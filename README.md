@@ -1,26 +1,28 @@
 # vector-router — vitrine technique
 
-> **Note.** Ce repo est un **extrait public** du projet vector-router : documentation d'architecture, benchmarks, contrat d'API gRPC et deux fichiers source représentatifs du style. Le code complet (routage, client VDB, licence, registre, serveur) est distribué sous licence commerciale. Voir [Licensing](#licensing) en bas.
+> **La couche de confiance entre vos agents IA et votre base vectorielle.**
+>
+> Ce repo est un **extrait public** du projet vector-router : documentation d'architecture, benchmarks, contrat d'API gRPC et deux fichiers source représentatifs du style. Le code complet (routage, client VDB, licence, registre, serveur) est distribué sous licence commerciale. Voir [Licensing](#licensing) en bas.
 
-Middleware Rust qui s'intercale entre les producteurs d'embeddings et une base vectorielle (Qdrant aujourd'hui). Il **valide, normalise et route** des vecteurs `f32` déjà calculés, avec des garanties de performance (chemin chaud ~1,4 µs hors réseau, zéro allocation) et d'observabilité (Prometheus + RED).
+Middleware Rust qui s'intercale entre vos producteurs d'embeddings — agents LLM (Claude, GPT, agents custom), pipelines RAG, jobs batch d'indexation — et votre base vectorielle (Qdrant aujourd'hui). Il **valide, normalise et route** chaque vecteur `f32` avant qu'il n'atteigne la base, avec des garanties de performance (chemin chaud ~1,4 µs hors réseau, zéro allocation) et d'observabilité (Prometheus + RED).
 
-Le service **ne fait pas d'inférence**. Il ne touche pas aux modèles. Il protège l'intégrité des vecteurs qui entrent dans la base et garantit que les recherches sont effectuées dans les mêmes conditions que l'ingestion.
+Le service **ne fait pas d'inférence**. Il ne touche pas aux modèles ni aux agents. Il protège l'intégrité des vecteurs qui entrent dans la mémoire d'entreprise et garantit que les recherches sont effectuées dans les mêmes conditions que l'ingestion.
 
 ## Pourquoi
 
-Trois problèmes récurrents dans les pipelines d'embeddings en production :
+Trois modes d'échec systématiques dans les stacks qui laissent des agents IA écrire directement en base vectorielle — invisibles pendant des mois :
 
-1. **Vecteurs corrompus en base** — un producteur envoie des NaN, des Inf, des dimensions fausses, qui polluent les index pendant des mois sans qu'on s'en aperçoive.
-2. **Scores de recherche biaisés** — la base contient des vecteurs normalisés, mais le vecteur de requête ne l'est pas (ou inversement). Les résultats sont systématiquement faux.
-3. **Aucune visibilité centrale** — chaque producteur gère sa propre logique, impossible de savoir ce qui entre dans la base sans auditer chaque service amont.
+1. **Corruption silencieuse** — un agent utilise le mauvais modèle (1536 dims au lieu de 3072), ou un provider renvoie des `NaN` / `Inf` sur ses batch endpoints. Ces points contaminent l'index ANN de façon permanente.
+2. **Scores de recherche biaisés** — les vecteurs stockés sont normalisés par un agent, le vecteur de requête est produit par un autre agent qui ne normalise pas. La similarité cosinus retourne des résultats faux, sans erreur visible.
+3. **Aucune attribution** — impossible de savoir quel agent a poussé quel vecteur. Des mois de ré-indexation potentielle à des dizaines de milliers d'euros en appels modèle quand le problème est finalement découvert.
 
-Le middleware traite les trois en un seul point de contrôle.
+Le middleware traite les trois en un seul point de contrôle. Chaque requête porte un `producer_id` qui devient un label Prometheus — vous voyez précisément quel agent envoie des vecteurs mal formés.
 
 ## Résultats mesurés
 
 - **Chemin chaud** : ~1,4 µs pour 1536 dims (validation + L2 norm² + normalisation). Détails et méthodo dans [`BENCHES.md`](BENCHES.md).
 - **Débit `l2_norm_squared`** : ~2,2 Gélém/s (×6,3 vs la version naïve, par refactor branchless + 8 accumulateurs parallèles, sans `unsafe` ni `-C fast-math`).
-- **Tests** : 96 unitaires + intégration + concurrence loom, tous verts. Zéro `unsafe`, zéro `unwrap`/`expect` hors `main.rs`, clippy `-D warnings` vert, miri vert sur modules sensibles.
+- **Tests** : 101 unitaires + intégration + concurrence loom + anti-abus licence, tous verts. Zéro `unsafe`, zéro `unwrap`/`expect` hors `main.rs`, clippy `-D warnings` vert, miri vert sur modules sensibles.
 - **Image Docker** : ~46 Mo (distroless/cc `nonroot`, CPU target `x86-64-v3` pour compatibilité serveurs ≥ 2013).
 
 ## Architecture
