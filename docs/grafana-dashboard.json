@@ -1,0 +1,231 @@
+{
+  "title": "Vector Router — Observabilité SRE",
+  "tags": ["vector-router", "rust", "middleware"],
+  "schemaVersion": 39,
+  "editable": true,
+  "timezone": "",
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        }
+      },
+      {
+        "name": "model_id",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(requests_total, model_id)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Taux de requêtes (RED — Rate)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "sum by (op, status) (rate(requests_total{model_id=~\"$model_id\"}[1m]))",
+          "legendFormat": "{{op}} — {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {"drawStyle": "line", "lineInterpolation": "smooth"}
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Taux d'erreurs (RED — Errors)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(requests_total{model_id=~\"$model_id\", status!=\"ok\"}[1m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {"mode": "palette-classic"}
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Latence des requêtes (RED — Duration)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, op) (rate(request_duration_seconds_bucket{model_id=~\"$model_id\"}[5m])))",
+          "legendFormat": "p50 — {{op}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, op) (rate(request_duration_seconds_bucket{model_id=~\"$model_id\"}[5m])))",
+          "legendFormat": "p95 — {{op}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(request_duration_seconds_bucket{model_id=~\"$model_id\"}[5m])))",
+          "legendFormat": "p99 — {{op}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s"}
+      }
+    },
+    {
+      "id": 4,
+      "title": "Saturation VDB (opérations en vol)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "vdb_inflight",
+          "legendFormat": "inflight",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 50},
+              {"color": "red", "value": 200}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Pool de buffers — disponibilité",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "gridPos": {"x": 0, "y": 16, "w": 8, "h": 7},
+      "targets": [
+        {
+          "expr": "pool_available",
+          "legendFormat": "buffers dispo",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(pool_exhausted_total[1m])",
+          "legendFormat": "fallback allocs /s",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 6,
+      "title": "Taux de copies par désalignement",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "gridPos": {"x": 8, "y": 16, "w": 8, "h": 7},
+      "description": "Si > 1 %, signal à investiguer côté producteur amont (envoi de bytes non alignés).",
+      "targets": [
+        {
+          "expr": "sum(rate(misaligned_copies_total[5m])) / sum(rate(requests_total{status=\"ok\"}[5m]))",
+          "legendFormat": "ratio",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.01},
+              {"color": "red", "value": 0.1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Normalisations effectuées par modèle",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "gridPos": {"x": 16, "y": 16, "w": 8, "h": 7},
+      "targets": [
+        {
+          "expr": "sum by (model_id) (rate(normalizations_performed_total[1m]))",
+          "legendFormat": "{{model_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 8,
+      "title": "Modèles enregistrés (gauge)",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "gridPos": {"x": 0, "y": 23, "w": 8, "h": 4},
+      "targets": [
+        {
+          "expr": "registered_models",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        }
+      }
+    }
+  ]
+}

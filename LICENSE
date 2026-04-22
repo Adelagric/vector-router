@@ -1,0 +1,33 @@
+Copyright (c) 2026 Adel Kaleche. All rights reserved.
+
+This repository contains a curated public extract of the vector-router project:
+architecture documentation, benchmarks, gRPC API contract, and two source files
+selected to illustrate coding style. It does NOT constitute a functional
+distribution of the software.
+
+The following permissions are granted for the contents of this repository:
+
+  - You may read, study, and reference the material for educational purposes.
+  - You may quote short excerpts in articles, talks, or technical discussions,
+    provided you attribute the source and link back to this repository.
+
+The following are NOT permitted without a separate written agreement:
+
+  - Redistribution of the contents of this repository, in whole or substantial
+    part, in modified or unmodified form.
+  - Use of the contents as a basis for a competing product or service.
+  - Commercial use of any kind, including internal deployment within a
+    for-profit organization, beyond study and reference.
+
+The full vector-router software (including source code, build system, license
+issuance tools, and operator documentation) is distributed under separate
+commercial agreements in three tiers (binary distribution, Docker image,
+source code). For licensing inquiries:
+
+  Adel Kaleche <kaleche@gmail.com>
+
+THIS REPOSITORY IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM THE
+USE OF THE MATERIAL IN THIS REPOSITORY.

@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package vector_router.v1;
+
+// Service principal : ingestion et recherche de vecteurs déjà calculés.
+// Les deux RPC partagent la même logique de validation et normalisation ;
+// seule l'opération Qdrant finale diffère (upsert vs search).
+service VectorRouter {
+  rpc Upsert(UpsertRequest) returns (UpsertResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+}
+
+// --- Upsert ------------------------------------------------------------------
+
+message UpsertRequest {
+  // Identifiant du modèle source. Doit être déclaré dans le registre côté serveur.
+  string model_id = 1;
+  // Identifiant du point dans la base vectorielle.
+  string point_id = 2;
+  // Vecteur f32 encodé little-endian. Longueur attendue = dim * 4 octets.
+  bytes vector = 3;
+  // Dimension redondante pour contrat explicite avec le client ; validée contre model_id.
+  uint32 dim = 4;
+  // Métadonnées arbitraires transmises à la base vectorielle.
+  map<string, string> metadata = 5;
+  // Identifiant logique du producteur d'embeddings (ex: "search-service-v2",
+  // "batch-nightly"). Optionnel ; vide => "unknown" côté métriques/journal.
+  // Doit être un ensemble borné de valeurs (nom de service, pas UUID) pour
+  // ne pas exploser la cardinalité des labels Prometheus.
+  string producer_id = 6;
+}
+
+message UpsertResponse {
+  string point_id = 1;
+  // Temps de traitement côté middleware, en microsecondes.
+  uint64 processing_us = 2;
+  bool was_normalized = 3;
+  // Namespace résolu par le registre pour ce modèle.
+  string vdb_namespace = 4;
+}
+
+// --- Search ------------------------------------------------------------------
+
+message SearchRequest {
+  // Identifiant du modèle source — doit correspondre au modèle utilisé pour
+  // produire les vecteurs stockés qu'on cherche à requêter. Détermine le
+  // namespace et la politique de normalisation appliquée à `vector`.
+  string model_id = 1;
+  // Vecteur de requête f32 little-endian. Longueur attendue = dim * 4 octets.
+  bytes vector = 2;
+  // Dimension redondante pour contrat explicite avec le client.
+  uint32 dim = 3;
+  // Nombre maximal de résultats à retourner (k plus proches voisins).
+  uint32 limit = 4;
+  // Seuil optionnel sur le score de similarité ; les points en dessous sont
+  // filtrés. 0.0 = pas de filtrage. Sémantique du score selon la distance
+  // configurée côté Qdrant (cosinus, dot, euclidienne).
+  float score_threshold = 5;
+  // Filtre optionnel sur les métadonnées des points stockés (égalité clé/valeur).
+  map<string, string> metadata_filter = 6;
+  // Identifiant logique du producteur (ex: "search-frontend", "api-gateway").
+  // Cardinalité bornée, cf. UpsertRequest.producer_id.
+  string producer_id = 7;
+}
+
+message SearchResponse {
+  repeated SearchHit hits = 1;
+  uint64 processing_us = 2;
+  bool was_normalized = 3;
+  string vdb_namespace = 4;
+}
+
+message SearchHit {
+  string point_id = 1;
+  // Score de similarité. Intervalle dépendant de la distance Qdrant :
+  // - cosinus : [-1, 1], plus grand = plus proche.
+  // - dot    : non borné, plus grand = plus proche.
+  // - eucl.  : [0, +∞), plus petit = plus proche.
+  float score = 2;
+  map<string, string> metadata = 3;
+}
