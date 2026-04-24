@@ -28,32 +28,17 @@ SANS vector-router                         AVEC vector-router
 >
 > Avec vector-router en coupure : la requête aurait été rejetée au premier batch (model_id incohérent avec la dim annoncée), un compteur Prometheus `requests_total{status="invalid_dim",producer_id="rag-nightly"}` serait monté instantanément, alerte PagerDuty à t0.
 
-## Voir le rejet en 30 secondes
+## Voir la démo (90 s, enregistrée en live)
 
-Un vecteur contenant un `NaN` envoyé à l'`Upsert` renvoie, en ~1,4 µs côté serveur :
+![Vector Router — démo live](docs/media/demo.svg)
 
-```bash
-grpcurl -plaintext -proto proto/vector_router/v1/router.proto \
-  -d '{
-        "model_id": "openai-text-embedding-3-small",
-        "point_id": "demo-nan",
-        "vector": "<bytes f32 contenant un NaN>",
-        "dim": 1536,
-        "producer_id": "demo-client"
-      }' \
-  localhost:50051 vector_router.v1.VectorRouter/Upsert
-```
+Trois cas, stack réelle (Qdrant + vector-router en docker-compose, mode évaluation 45 jours) :
 
-```
-ERROR: Code: InvalidArgument
-Message: valeur numérique invalide : NaN à l'index 42
-```
+1. **Vecteur 1536-dim valide** → accepté, routé vers Qdrant, `wasNormalized: true`.
+2. **Même vecteur, NaN à l'index 42** → `InvalidArgument: vecteur contient NaN ou Inf`. Jamais écrit en base.
+3. **Agent `rag-nightly` envoie un 512-dim au lieu de 1536** → `InvalidArgument: dimension invalide`. Visible dans Prometheus avec le bon `producer_id`.
 
-Et côté Prometheus :
-```
-requests_total{model_id="openai-text-embedding-3-small",op="upsert",
-               status="invalid_numeric",producer_id="demo-client"} 1
-```
+La démo est reproductible — voir [quickstart](#quickstart--vector-router--qdrant-en-5-minutes) ci-dessous.
 
 ---
 
