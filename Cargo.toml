@@ -1,0 +1,15 @@
+[package]
+name = "vector-router-verify"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "LicenseRef-Proprietary"
+description = "Verification crate for the vector-router showcase samples — compiles, tests and lints the public extracts under samples/. Not a redistribution of the full product."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bytemuck = "1"
+crossbeam-queue = "0.3"
+metrics = "0.24"

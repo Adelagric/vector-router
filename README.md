@@ -1,5 +1,9 @@
 # vector-router
 
+[![CI](https://github.com/Adelagric/vector-router/actions/workflows/ci.yml/badge.svg)](https://github.com/Adelagric/vector-router/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/license-proprietary-lightgrey)](LICENSE)
+
 # Stop silent embedding corruption.
 
 **La couche de confiance entre vos agents IA et votre base vectorielle.** Un point de contrôle gRPC qui valide, normalise et route chaque vecteur avant qu'il n'entre en base — pour que la mémoire de l'entreprise reste intègre et que les scores de recherche soient cohérents par construction.
@@ -130,6 +134,18 @@ Deux RPC exposés (voir [`proto/vector_router/v1/router.proto`](proto/vector_rou
 Les deux requêtes portent un champ `producer_id` optionnel (nom de service, cardinalité bornée) qui devient un label Prometheus — permet d'identifier précisément quel producteur envoie des vecteurs mal formés.
 
 Tour de code module par module : [`CODE_WALKTHROUGH.md`](CODE_WALKTHROUGH.md). Arbitrages de design argumentés : [`DECISIONS.md`](DECISIONS.md).
+
+## Vérification automatique (CI)
+
+Les extraits publics sous [`samples/`](samples/) sont compilés, lintés et testés à chaque commit via une [GitHub Action](.github/workflows/ci.yml) — voir le badge `CI` en haut du README.
+
+```
+cargo fmt --check          → format vérifié
+cargo clippy -D warnings   → zéro warning toléré
+cargo test --all-targets   → 22 tests verts (math + pool)
+```
+
+Couvert : alignement mémoire, propriétés numériques (NaN/Inf, normalisation, vecteur nul), pool RAII, comportement sous charge concurrente. Le crate complet du produit (registre, service gRPC, client VDB, licence) ajoute ~80 tests supplémentaires non publiés ici par périmètre — le détail est dans [`BENCHES.md`](BENCHES.md) et [`DECISIONS.md`](DECISIONS.md).
 
 ## Extraits de code
 
