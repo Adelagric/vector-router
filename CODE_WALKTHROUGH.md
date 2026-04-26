@@ -161,6 +161,70 @@ Le retour booléen indique si une division a effectivement eu lieu (utile pour l
 
 ---
 
+## Patterns avancés (traits, génériques, lifetimes)
+
+Les sections ci-dessous pointent vers les usages non triviaux du système de types — utiles pour qui veut juger du niveau de discipline Rust avant le cycle d'achat. Tous les liens vont vers les fichiers publics du repo, lintés par la CI.
+
+### `Cow<'a, [f32]>` pour zero-copy conditionnel — [`samples/math.rs:30-62`](samples/math.rs#L30-L62)
+
+`validate_and_align` retourne un `Cow<'a, [f32]>` dont la vie est unifiée sur les deux paramètres `raw: &'a [u8]` et `scratch: &'a mut AlignedBuffer`. L'appelant ne distingue jamais entre **zero-copy** (le `bytes` protobuf est aligné, retour de `Cow::Borrowed(raw_as_f32)`) et **copie unique** (désaligné, retour d'une vue dans `scratch`). Le borrow-checker garantit que la vue ne survit ni à `raw` ni à `scratch`. Aucun coût runtime à l'abstraction.
+
+```rust
+pub fn validate_and_align<'a>(
+    raw: &'a [u8],
+    expected_dim: usize,
+    scratch: &'a mut AlignedBuffer,
+) -> Result<Cow<'a, [f32]>, Error>
+```
+
+### Trait objects et RAII : `PooledBuffer<'p>` — [`samples/pool.rs:157-189`](samples/pool.rs#L157-L189)
+
+`PooledBuffer` implémente `Deref` + `DerefMut` vers `AlignedBuffer` (l'utilisateur écrit `pooled.copy_from_slice(...)` directement) et `Drop` pour rendre automatiquement le buffer au pool — à condition que sa capacité corresponde toujours au pool d'origine, sinon le buffer est jeté (cas d'un resize de config en cours de route).
+
+```rust
+impl<'p> std::ops::Deref for PooledBuffer<'p> {
+    type Target = AlignedBuffer;
+    fn deref(&self) -> &AlignedBuffer { &self.buffer }
+}
+
+impl<'p> Drop for PooledBuffer<'p> {
+    fn drop(&mut self) {
+        let mut buf = mem::take(&mut self.buffer); // sentinelle Default = vide, zéro alloc
+        buf.clear();
+        if buf.capacity_bytes() == self.pool.capacity_bytes {
+            let _ = self.pool.queue.push(buf);
+        }
+    }
+}
+```
+
+Le `mem::take` exploite l'`impl Default for AlignedBuffer` qui crée un buffer vide sans aucune allocation — pattern qui évite le `Option<AlignedBuffer>` et son `.expect()` corrélé (interdit par les règles du projet, voir invariants ci-dessous).
+
+### Turbofish typé sur `bytemuck` — [`samples/math.rs:50`](samples/math.rs#L50), [`samples/pool.rs:69-83`](samples/pool.rs#L69-L83)
+
+`bytemuck::try_cast_slice::<u8, f32>(raw)` et `bytemuck::cast_slice_mut::<u32, u8>(&mut self.storage)` exploitent les bornes `Pod`/`AnyBitPattern` du crate pour convertir des slices entre types primitifs **sans `unsafe`** côté projet. Les contraintes de taille / alignement sont vérifiées au runtime (`try_cast_slice`) ou statiquement quand c'est possible (`cast_slice_mut` entre types compatibles).
+
+### Génériques implicites via `chunks_exact` — [`samples/math.rs:77-107`](samples/math.rs#L77-L107)
+
+`l2_norm_squared` utilise `<[f32]>::chunks_exact(8)` pour produire un itérateur dont chaque élément est garanti `&[f32; 8]` à l'inférence — LLVM peut alors déplier en AVX2 `vmulps`/`vaddps`. Huit accumulateurs parallèles cassent la dépendance séquentielle de la réduction, sans `unsafe` ni `-C fast-math`. Détection NaN/Inf hors hot path : on exploite la propagation IEEE 754 puis on vérifie la sortie ; un second passage rare-path remonte l'erreur exacte.
+
+### `ArcSwap<HashMap<String, ModelSpec>>` — registre lock-free (référencé section `registry.rs`)
+
+Lecture sans verrou via `ArcSwap::load_full()` qui retourne un `Arc<HashMap>` — chaque handler gRPC clone son `Arc`, garde le snapshot pendant toute la requête, le drop libère atomiquement la version si plus aucun lecteur. Update via `rcu` (Read-Copy-Update) : retry automatique en cas de concurrence. Le crate complet expose le détail (privé), mais le pattern est classique en Rust senior et c'est ce qui permet aux deux RPC `Upsert`/`Search` de partager un registre cohérent sans `Mutex` sur le hot path.
+
+### Invariants à préserver (rappel)
+
+1. **Zéro `unsafe`** hors des appels à `bytemuck` (qui est safe lui-même).
+2. **Zéro `unwrap` / `expect`** hors de `main.rs`, des modules de tests, des benches et de `build.rs`.
+3. **Zéro allocation dans le chemin chaud hors désalignement** (et dans ce cas, une seule copie par requête via le pool).
+4. **`validate_and_align` ne panique jamais** — retourne toujours un `Result`.
+5. **Le pool ne bloque jamais** — épuisement = allocation ponctuelle.
+6. **Le registre n'observe jamais d'état partiel** — chaque `load()` retourne un snapshot atomique complet.
+
+Ces invariants sont **lintés en CI** (clippy `-D warnings`, fmt, tests). Voir [.github/workflows/ci.yml](.github/workflows/ci.yml).
+
+---
+
 ## Articulation entre modules
 
 Le service expose deux RPC gRPC : `Upsert` (écriture) et `Search` (lecture). Les deux partagent **exactement le même pipeline de validation et de normalisation** ; seule l'opération Qdrant finale et la forme de la réponse diffèrent.

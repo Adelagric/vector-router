@@ -5,3 +5,13 @@ Thumbs.db
 *.swo
 target/
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+samples/clients/python/_generated/
+
+# Node
+node_modules/
+package-lock.json
+

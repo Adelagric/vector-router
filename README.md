@@ -147,7 +147,16 @@ cargo test --all-targets   → 22 tests verts (math + pool)
 
 Couvert : alignement mémoire, propriétés numériques (NaN/Inf, normalisation, vecteur nul), pool RAII, comportement sous charge concurrente. Le crate complet du produit (registre, service gRPC, client VDB, licence) ajoute ~80 tests supplémentaires non publiés ici par périmètre — le détail est dans [`BENCHES.md`](BENCHES.md) et [`DECISIONS.md`](DECISIONS.md).
 
-## Extraits de code
+## Clients multi-langages
+
+L'API étant gRPC standard ([`router.proto`](proto/vector_router/v1/router.proto)), elle s'intègre dans n'importe quelle stack. Deux clients de référence sont fournis pour illustrer :
+
+- [`samples/clients/python/`](samples/clients/python/) — `grpcio` + `grpcio-tools`. Codegen runtime, pas de stubs versionnés.
+- [`samples/clients/typescript/`](samples/clients/typescript/) — `@grpc/grpc-js` + `@grpc/proto-loader`. Node 22+, pas de codegen.
+
+Les deux exécutent la même séquence (Upsert valide → Upsert NaN rejeté → Search), avec un `producer_id` distinct (`python-client`, `ts-client`) qui devient un label Prometheus côté router. Détails dans [`samples/clients/README.md`](samples/clients/README.md).
+
+## Extraits de code Rust
 
 Deux modules représentatifs du style sont fournis dans [`samples/`](samples/) :
 
