@@ -171,3 +171,36 @@ Les chiffres précédents (Kaby Lake) restaient annoncés comme "indicatifs" pr�
 - Sur **Apple Silicon (Mac mini M4, Mac Studio M4 Max, AWS Graviton4)** : on peut s'engager sur un hot path math < 500 ns à 99e percentile.
 - Sur **x86-64 serveur récent (Xeon Ice Lake, AMD Epyc Milan/Genoa)** : entre Kaby Lake et M4 Max, attendu autour de 0,5–0,8 µs.
 - Pour tout SLA contractuel, rebench sur le hardware exact de prod reste recommandé — les chiffres présents sont une preuve de concept, pas un engagement.
+
+### Leçons opérationnelles
+
+Sept conclusions transversales tirées de ce rebench, à garder en tête pour les itérations futures et les discussions client.
+
+**1. L'optimisation est portable, pas Intel-spécifique.** Le déroulage en 8 accumulateurs parallèles (étape 5) avait été pensé pour AVX2. Il rend exactement le même gain (×5,1 sur le débit) sur les unités NEON du M4 Max sans une ligne de code modifiée. La règle pour le crate : **exposer le parallélisme à LLVM**, pas écrire des intrinsics x86. Le code reste lisible, audit-able, et tourne partout (Apple Silicon, AWS Graviton, OCI Ampere, x86 récent).
+
+**2. Le thermal throttling cachait une partie du score Kaby Lake.** Mac Studio en boîtier desktop = fréquence stable sur toute la durée du bench. Le laptop Kaby Lake throttle ~30 % après quelques secondes de charge soutenue. Une partie du ×4,2 n'est pas "M4 Max plus rapide" mais "M4 Max non bridé". Conséquence pour un SLA : préciser le contexte thermique (boîtier, ventilo, durée de la fenêtre de mesure) — un même binaire sur un même CPU peut donner des résultats différents.
+
+**3. Le check IEEE 754 ne coûte rien à cette échelle.** À 11 Gélém/s, on sature les ports SIMD, pas la branche `is_finite`. La micro-optimisation envisagée (bitmask vectorisé sur les exposants pour détecter NaN/Inf) n'a plus aucune justification — gain négligeable, perte de lisibilité importante. Décision : **on n'y touche plus**.
+
+**4. `validate_and_align` aligné est devenu effectivement gratuit.** 2,4 ns ≈ 10 cycles à 4 GHz = check de longueur + cast `bytemuck::try_cast_slice`. À cette échelle, l'overhead **gRPC** (decode protobuf, lookup registre, encode réponse) domine entièrement le hot path math. Le prochain levier d'optimisation, s'il devient nécessaire, n'est ni dans `math.rs` ni dans `pool.rs`.
+
+**5. Le budget de 50 µs était surdimensionné.** On consomme **0,7 % du budget** pour la partie math sur M4 Max. Même la version naïve initiale tenait déjà l'objectif. Les deux itérations d'optimisation ne servaient pas à tenir le SLA — elles servaient à se donner une marge pour des cas futurs : vecteurs plus longs (3072+), batch streaming, hardware client défavorable. Important à se rappeler avant de relancer un troisième cycle d'optim.
+
+**6. Argument commercial mieux borné.** On a maintenant deux points sur la courbe :
+
+- **Kaby Lake mobile 2017** (mauvais cas, thermique limitée) → ~1,4 µs.
+- **M4 Max desktop 2025** (bon cas, sans throttling) → ~330 ns.
+
+Ce qui permet de répondre à un prospect avec : "votre Xeon Ice Lake / Epyc Milan / Graviton tombera entre les deux, probablement vers 0,5–0,8 µs". Plus crédible que "2-3× meilleur sur du moderne", et plus facilement défendable en pré-production avec un rebench ciblé.
+
+**7. Apple Silicon = cible serveur réaliste.** Le bench tourne natif arm64. AWS Graviton, OCI Ampere, GCP Tau T2A sont des serveurs ARM en prod, déjà adoptés par les acheteurs cloud-natifs. Le crate compile sans modification. Argument **réduction de facture cloud** à ressortir aux prospects qui ont ces instances dans leur catalogue.
+
+### Note sur le pipeline de release Tier 1/2
+
+Le M4 Max est excellent pour le développement et les benchmarks, mais la production des artefacts Linux x86-64 (Tier 1 binary, Tier 2 Docker image) ne peut **pas** se faire en émulation QEMU sur arm64 — `proc-macro2` build-script segfaute (SIGSEGV) sous l'émulation Colima/Lima. Le pipeline de release officiel doit donc tourner sur :
+
+- une machine x86-64 native (Linux ou Mac Intel),
+- une CI Linux x86-64 (GitHub Actions runner standard `ubuntu-latest`),
+- ou Docker Desktop avec Rosetta 2 (qui gère mieux ce cas particulier que QEMU).
+
+Le `Makefile` est correct (`docker build --platform linux/amd64`) mais l'exécution doit avoir lieu dans un environnement compatible. Détail à intégrer au runbook avant la première vraie livraison Tier 1.
