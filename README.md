@@ -60,8 +60,8 @@ Ce que le service **ne fait pas** : pas d'inférence, pas de cache, pas de trans
 
 ## Résultats mesurés
 
-- **Chemin chaud** : ~1,4 µs pour 1536 dims (validation + L2 norm² + normalisation). Détails et méthodo dans [`BENCHES.md`](BENCHES.md).
-- **Débit `l2_norm_squared`** : ~2,2 Gélém/s (×6,3 vs la version naïve, par refactor branchless + 8 accumulateurs parallèles, sans `unsafe` ni `-C fast-math`).
+- **Chemin chaud** : **~330 ns** pour 1536 dims (validation + L2 norm² + normalisation) sur Mac Studio M4 Max ; ~1,4 µs sur laptop Intel Kaby Lake 2017. Détails et méthodo dans [`BENCHES.md`](BENCHES.md).
+- **Débit `l2_norm_squared`** : **~11 Gélém/s** sur M4 Max, ~2,2 Gélém/s sur Kaby Lake (×5,1 vs Intel mobile, ×6,3 vs version naïve). Refactor branchless + 8 accumulateurs parallèles, sans `unsafe` ni `-C fast-math`.
 - **Tests** : 101 unitaires + intégration + concurrence loom + anti-abus licence, tous verts. Zéro `unsafe`, zéro `unwrap`/`expect` hors `main.rs`, clippy `-D warnings` vert, miri vert sur modules sensibles.
 - **Image Docker** : ~46 Mo (distroless/cc `nonroot`, CPU target `x86-64-v3` pour compatibilité serveurs ≥ 2013).
 
