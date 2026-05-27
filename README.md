@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/Adelagric/vector-router/actions/workflows/ci.yml/badge.svg)](https://github.com/Adelagric/vector-router/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/license-proprietary-lightgrey)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
 # Stop silent embedding corruption.
 
 **La couche de confiance entre vos agents IA et votre base vectorielle.** Un point de contrôle gRPC qui valide, normalise et route chaque vecteur avant qu'il n'entre en base — pour que la mémoire de l'entreprise reste intègre et que les scores de recherche soient cohérents par construction.
 
-> Ce repo est un **extrait public** : architecture, benchmarks, contrat d'API gRPC, 2 fichiers source illustratifs. Le code complet (routage, client VDB, licence, registre, serveur) est en licence commerciale. Voir [Licensing](#licensing).
+> Vector Router est distribué sous **licence Apache 2.0**. Ce repo héberge aujourd'hui l'architecture, les benchmarks, le contrat d'API gRPC et deux modules source représentatifs (math + pool, lintés et testés en CI). La migration du code applicatif complet (routage, client VDB, registre, serveur) depuis le repo de travail est en cours.
 
 ---
 
@@ -215,18 +215,18 @@ Détails des arbitrages (format, anti-abus, chaîne de confiance) : [`DECISIONS.
 - **Pas d'endpoints admin dynamiques** : modèles déclarés en config au démarrage.
 - **Benchmarks laptop Intel 2017** : chiffres indicatifs, à rebencher sur hardware de prod avec fréquence CPU fixe pour tout SLA contractuel.
 
-## Licensing
+## Licence
 
-Le code complet est distribué commercialement sous trois formats :
+Vector Router est distribué sous **[Apache License 2.0](LICENSE)**. Vous pouvez l'utiliser, le modifier, l'embarquer dans un produit commercial, l'auto-héberger en production — sans contrepartie financière.
 
-1. **Tier 1 — binaire** : archive `vector-router-x.y.z-linux-x86_64.tar.gz` + `.lic` client.
-2. **Tier 1 alternatif — image Docker** : tarball `docker save`, import via `docker load`.
-3. **Tier 3 — code source** : archive complète avec droit de recompiler, modifier, signer vos propres licences clients. Paire de clés Ed25519 générée par l'acheteur.
+Si vous voulez du support production, des intégrations sur mesure (pgvector, Pinecone, Weaviate, OTLP, endpoints admin dynamiques), du conseil en déploiement ou un SLA contractuel, c'est l'objet de l'offre commerciale séparée :
 
-Ce repo public ne contient **pas** de code fonctionnel permettant de reconstruire le binaire. Les fichiers dans `samples/` illustrent le style mais dépendent du crate complet.
+**Contact** : [kaleche@gmail.com](mailto:kaleche@gmail.com)
 
-**Contact commercial** : [kaleche@gmail.com](mailto:kaleche@gmail.com)
+## Contribuer
+
+Issues, PRs, repros de bugs et propositions de design bienvenues. Aucun CLA requis ; en soumettant une contribution vous l'autorisez sous Apache 2.0 conformément à la clause 5 de la licence.
 
 ---
 
-*© 2026 Adel Kaleche. Tous droits réservés sur les fichiers de ce repo. Voir [LICENSE](LICENSE).*
+*Copyright 2026 Adel Kaleche. Distribué sous Apache License 2.0 — voir [LICENSE](LICENSE).*

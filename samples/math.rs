@@ -1,8 +1,14 @@
-// Extrait public du projet vector-router — fichier fourni à titre de vitrine
-// technique. Ce fichier ne se compile pas seul ; il dépend du crate complet.
-// Code complet distribué commercialement (Tier 3). Contact : kaleche@gmail.com
+// Copyright 2026 Adel Kaleche
 //
-// (C) 2026 Adel Kaleche. All rights reserved. Voir LICENSE à la racine du repo.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
 //! Noyau numérique du pipeline : validation/alignement, norme L2, normalisation.
 //!

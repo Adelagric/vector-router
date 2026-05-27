@@ -3,8 +3,8 @@ name = "vector-router-verify"
 version = "0.1.0"
 edition = "2021"
 publish = false
-license = "LicenseRef-Proprietary"
-description = "Verification crate for the vector-router showcase samples — compiles, tests and lints the public extracts under samples/. Not a redistribution of the full product."
+license = "Apache-2.0"
+description = "Verification crate for the vector-router samples — compiles, tests and lints the public modules under samples/."
 
 [lib]
 path = "src/lib.rs"
