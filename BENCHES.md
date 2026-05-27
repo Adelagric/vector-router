@@ -1,206 +1,206 @@
 # Benchmarks
 
-Chaque section ajoute les résultats d'un run. Format : commande + date + hardware + chiffres + interprétation. Les divergences entre sessions sont notées.
+Each section records one run. Format: command + date + hardware + numbers + interpretation. Divergences between sessions are noted.
 
-## Hardware (sessions étape 5)
+## Hardware (step 5 sessions)
 
-- `uname -a` : `Darwin MBP-de-Adel 22.6.0 Darwin Kernel Version 22.6.0 ... RELEASE_X86_64 x86_64`
-- CPU : `Intel(R) Core(TM) i5-7360U CPU @ 2.30GHz` (Kaby Lake, 2 cœurs / 4 threads, AVX2)
-- OS : macOS 13 (Darwin 22)
+- `uname -a`: `Darwin MBP-de-Adel 22.6.0 Darwin Kernel Version 22.6.0 ... RELEASE_X86_64 x86_64`
+- CPU: `Intel(R) Core(TM) i5-7360U CPU @ 2.30GHz` (Kaby Lake, 2 cores / 4 threads, AVX2)
+- OS: macOS 13 (Darwin 22)
 
-## 2026-04-18 — Étape 5 (math.rs)
+## 2026-04-18 — Step 5 (math.rs)
 
-Commande : `cargo bench --bench normalize` puis `cargo bench --bench alignment`
-Build : `rustc 1.95.0`, profil `bench` (opt-level=3), `.cargo/config.toml` → `-C target-cpu=native`
-Criterion : 0.8.2
+Command: `cargo bench --bench normalize` then `cargo bench --bench alignment`
+Build: `rustc 1.95.0`, `bench` profile (opt-level=3), `.cargo/config.toml` → `-C target-cpu=native`
+Criterion: 0.8.2
 
-| Bench | Min | Médiane | Max | ns / élément |
+| Bench | Min | Median | Max | ns / element |
 |---|---|---|---|---|
 | `l2_norm_squared_1536` | 4.32 µs | 4.44 µs | 4.57 µs | ~2.9 ns |
 | `normalize_in_place_1536` | 1.14 µs | 1.33 µs | 1.59 µs | ~0.9 ns |
 | `validate_and_align_aligned_1536` | 13.3 ns | 14.4 ns | 15.6 ns | — |
 | `validate_and_align_misaligned_1536` | 200 ns | 207 ns | 213 ns | — |
 
-### Interprétation
+### Interpretation
 
-- **`l2_norm_squared`** : ~3 ns/élément. Le test `is_finite` sur chaque `f32` bloque probablement la vectorisation auto (SIMD). Si on veut descendre à <1 ns/élément, il faudra soit séparer la vérif NaN/Inf en une passe vectorisée (par ex. via un bitmask sur les exposants), soit vivre avec. Comme le budget total est 50 µs pour 1536 dims, 4.4 µs reste confortable (8,8 % du budget).
+- **`l2_norm_squared`**: ~3 ns/element. The `is_finite` check on each `f32` likely blocks auto-vectorization (SIMD). To push below 1 ns/element we would have to either split the NaN/Inf check into a separate vectorized pass (e.g. a bitmask on the exponents) or live with it. Since the total budget is 50 µs for 1536 dims, 4.4 µs remains comfortable (8.8 % of the budget).
 
-- **`normalize_in_place`** : ~0.9 ns/élément. Le compilateur a sans doute vectorisé la division via AVX2 (8 f32 en parallèle). Division vectorielle ~7 ns pour 8 éléments → 192 × 7 ≈ 1.3 µs, concordant.
+- **`normalize_in_place`**: ~0.9 ns/element. The compiler probably vectorized the division via AVX2 (8 f32 in parallel). Vector division ~7 ns for 8 elements → 192 × 7 ≈ 1.3 µs, consistent.
 
-- **`validate_and_align_aligned`** : 14 ns. Essentiellement une vérif d'alignement + longueur, inlinée. Quatre à six cycles CPU. Seuil de plausibilité « trop beau » = 10 ns (règle du brief) ; 14 ns est juste au-dessus, pas suspect. Pour un vecteur déjà aligné (cas normal) c'est effectivement quasi-gratuit.
+- **`validate_and_align_aligned`**: 14 ns. Essentially an alignment + length check, inlined. Four to six CPU cycles. The "too good to be true" plausibility threshold is 10 ns (brief's rule); 14 ns sits just above, not suspicious. For an already-aligned vector (the normal case) it is effectively free.
 
-- **`validate_and_align_misaligned`** : 207 ns pour copier 6144 octets. ~30 GB/s bande passante → L1 cache, cohérent pour i5-7360U. Si le taux de désalignement dépasse 1 % en prod, ça coûte 2 ns supplémentaires en moyenne — négligeable. Un taux plus haut signale un souci côté producteur (à investiguer, pas à optimiser).
+- **`validate_and_align_misaligned`**: 207 ns to copy 6144 bytes. ~30 GB/s bandwidth → L1 cache, consistent for an i5-7360U. If the misalignment rate exceeds 1 % in prod, that costs 2 ns extra on average — negligible. A higher rate signals a producer-side issue (to investigate, not to optimize around).
 
-### Budget global estimé sur le chemin chaud
+### Estimated overall hot-path budget
 
-Pour une requête 1536 dims aligned + normalize :
+For a 1536-dim aligned + normalize request:
 `validate_and_align + l2_norm² + normalize ≈ 14 ns + 4.4 µs + 1.3 µs = 5.7 µs`
 
-Objectif du brief : **< 50 µs**. On est à ~11 % du budget pour la partie math. Reste à ajouter : decode protobuf, lookup registre, call VDB (hors scope local), construction réponse. Budget confortable.
+Brief's target: **< 50 µs**. We sit at ~11 % of the budget for the math portion. Still to add: protobuf decode, registry lookup, VDB call (out of local scope), response construction. Comfortable budget.
 
-### Points à surveiller
+### Things to watch
 
-- Hardware de benchmark = laptop Intel Kaby Lake 2017. Un Xeon récent ou un M1+ devrait aller ~2–3 × plus vite. Les chiffres de ce report ne sont donc pas à prendre comme engagement client.
-- L'écart-type sur `normalize_in_place` est relativement large (1.14 → 1.59 µs, +40 %). Sans doute lié à la variabilité thermique/fréquence d'un laptop. À rebencher sur une machine stable (serveur avec fréquence fixe) avant tout engagement contractuel.
+- Benchmark hardware = 2017 Intel Kaby Lake laptop. A recent Xeon or an M1+ should run ~2–3× faster. The numbers in this report should therefore not be treated as a customer commitment.
+- The standard deviation on `normalize_in_place` is relatively wide (1.14 → 1.59 µs, +40 %). Probably tied to a laptop's thermal/frequency variability. Re-bench on a stable machine (server with fixed frequency) before any contractual commitment.
 
-## 2026-04-19 — Étape 5 (optimisation math.rs — huit accumulateurs parallèles)
+## 2026-04-19 — Step 5 (math.rs optimization — eight parallel accumulators)
 
-Commande : `cargo bench --bench normalize`
-Modification : réécriture de `l2_norm_squared` avec huit accumulateurs indépendants (`chunks_exact(8)` + déroulage manuel). Briser la chaîne de dépendance séquentielle permet à LLVM de générer du code SIMD avec ILP sans violer l'associativité stricte IEEE 754 (pas de `-C fast-math`).
+Command: `cargo bench --bench normalize`
+Change: rewrote `l2_norm_squared` with eight independent accumulators (`chunks_exact(8)` + manual unroll). Breaking the sequential dependency chain lets LLVM emit SIMD code with ILP without violating strict IEEE 754 associativity (no `-C fast-math`).
 
-### Résultats `l2_norm_squared` multi-tailles
+### `l2_norm_squared` results, multi-size
 
-| Dim | Min | Médiane | Max | Débit médian | Gain vs version précédente |
+| Dim | Min | Median | Max | Median throughput | Gain vs previous version |
 |---|---|---|---|---|---|
-| 256  | 107 ns | 117 ns | 130 ns | 2.18 Gélém/s | **−70 %** |
-| 768  | 318 ns | 346 ns | 379 ns | 2.22 Gélém/s | **−67 %** |
-| 1536 | 631 ns | 702 ns | 785 ns | 2.19 Gélém/s | **−66 %** |
-| 3072 | 1.08 µs | 1.13 µs | 1.18 µs | 2.72 Gélém/s | **−72 %** |
+| 256  | 107 ns | 117 ns | 130 ns | 2.18 Gelem/s | **−70 %** |
+| 768  | 318 ns | 346 ns | 379 ns | 2.22 Gelem/s | **−67 %** |
+| 1536 | 631 ns | 702 ns | 785 ns | 2.19 Gelem/s | **−66 %** |
+| 3072 | 1.08 µs | 1.13 µs | 1.18 µs | 2.72 Gelem/s | **−72 %** |
 
-Débit constant à ~2.2 Gélém/s → régime compute-bound bien exploité. Le gain de ~3× (médiane) combiné au passage en branchless donne un gain total d'environ **×6.3 vs la version initiale** pour 1536 dims (4.44 µs → 702 ns).
+Steady throughput at ~2.2 Gelem/s → compute-bound regime well exploited. The ~3× gain (median) combined with the branchless rewrite yields a total gain of about **×6.3 vs the initial version** for 1536 dims (4.44 µs → 702 ns).
 
-### Comparaison sur 1536 dims au fil des itérations
+### Comparison on 1536 dims across iterations
 
-| Version | Médiane | Gain cumulé |
+| Version | Median | Cumulative gain |
 |---|---|---|
-| V1 — boucle branched (fusion validate + somme) | 4.44 µs | baseline |
-| V2 — branchless 1 passe, `iter().map().sum()` | 2.10 µs | ×2.1 |
-| V3 — 8 accumulateurs parallèles + branchless | **702 ns** | **×6.3** |
+| V1 — branched loop (fused validate + sum) | 4.44 µs | baseline |
+| V2 — branchless 1 pass, `iter().map().sum()` | 2.10 µs | ×2.1 |
+| V3 — 8 parallel accumulators + branchless | **702 ns** | **×6.3** |
 
-### Interprétation
+### Interpretation
 
-- Throughput ~2.2 Gélém/s = ~12 % du pic théorique AVX2 (18 Gélém/s à 2.3 GHz × 8 f32 par FMA). Le compilateur exploite probablement SSE (4 f32) plutôt qu'AVX2 complet, ou utilise des instructions séparées mul+add sans FMA fusionné. L'optim suivante (si nécessaire) serait d'utiliser `wide::f32x8` ou `core::simd` pour forcer l'AVX2, mais on est déjà largement sous le budget de 50 µs.
-- La non-linéarité entre 256 et 3072 est faible (débit flat à 2.2 Gélém/s, légèrement mieux à 3072 — probablement l'overhead fixe qui s'amortit). Comportement sain, pas de discontinuité à cacher.
-- `normalize_in_place_1536` à ~710 ns (médiane, variabilité thermique importante). Pas de changement volontaire sur cette fonction — les variations entre runs reflètent l'état du laptop plus qu'autre chose.
+- Throughput ~2.2 Gelem/s = ~12 % of the theoretical AVX2 peak (18 Gelem/s at 2.3 GHz × 8 f32 per FMA). The compiler probably uses SSE (4 f32) rather than full AVX2, or emits separate mul+add without fused FMA. The next optimization (if needed) would be to use `wide::f32x8` or `core::simd` to force AVX2, but we are already well under the 50 µs budget.
+- Non-linearity between 256 and 3072 is mild (throughput flat at 2.2 Gelem/s, slightly better at 3072 — probably fixed overhead amortizing). Healthy behavior, no discontinuity to hide.
+- `normalize_in_place_1536` at ~710 ns (median, significant thermal variability). No deliberate change to this function — variations between runs reflect the state of the laptop more than anything else.
 
-### Nouveau budget chemin chaud estimé
+### New estimated hot-path budget
 
-Pour une requête 1536 dims aligned + normalize :
+For a 1536-dim aligned + normalize request:
 `validate_and_align + l2_norm² + normalize ≈ 14 ns + 702 ns + 710 ns ≈ 1.4 µs`
 
-Soit ~3 % du budget de 50 µs, contre 11 % avec la V1. Marge opérationnelle confortable, y compris dans un scénario où le hardware de prod serait moins rapide que prévu.
+That is ~3 % of the 50 µs budget, down from 11 % with V1. Comfortable operating margin, including a scenario where production hardware is slower than expected.
 
 ### Validation
 
-- 13 tests unitaires `math` verts (correction numérique, cas NaN/Inf, tolérances de normalisation).
-- `miri` vert sur le module `math` : aucun UB introduit par le déroulage.
-- Clippy et fmt verts.
-- Assertions de sanité intra-bench passent (deux vecteurs distincts → normes² distinctes, normalisation donne ‖v‖ ≈ 1).
+- 13 `math` unit tests green (numerical correctness, NaN/Inf cases, normalization tolerances).
+- `miri` green on the `math` module: no UB introduced by the unrolling.
+- Clippy and fmt green.
+- In-bench sanity assertions pass (two distinct vectors → distinct squared norms, normalization yields ‖v‖ ≈ 1).
 
-### Vérification ASM (ajoutée le 2026-04-19)
+### ASM verification (added on 2026-04-19)
 
-Outil : `cargo install cargo-show-asm` puis `cargo asm --lib vector_router::math::l2_norm_squared` avec `#[inline(never)]` appliqué temporairement (restauré en `#[inline]` après inspection).
+Tool: `cargo install cargo-show-asm` then `cargo asm --lib vector_router::math::l2_norm_squared` with `#[inline(never)]` applied temporarily (restored to `#[inline]` after inspection).
 
-**Résultat** :
-- LLVM vectorise en **SSE 128-bit** (registres `xmm`), pas en AVX2 256-bit (`ymm`).
-- Instructions observées : `vmovups xmm`, `vmulps xmm`, `vaddps xmm`.
-- Quatre accumulateurs `xmm0..3` avec unroll × 2 (8 chunks de 4 f32 par itération).
-- Zéro instruction `ymm` dans le binaire : `cargo asm --lib --simplify | grep -c ymm` → 0.
+**Result**:
+- LLVM vectorizes in **SSE 128-bit** (`xmm` registers), not AVX2 256-bit (`ymm`).
+- Instructions observed: `vmovups xmm`, `vmulps xmm`, `vaddps xmm`.
+- Four accumulators `xmm0..3` with unroll × 2 (8 chunks of 4 f32 per iteration).
+- Zero `ymm` instructions in the binary: `cargo asm --lib --simplify | grep -c ymm` → 0.
 
-**Features CPU disponibles mais non exploitées** : `rustc --print cfg -C target-cpu=native` remonte `avx`, `avx2`, `fma` sur Skylake/Kaby Lake. LLVM choisit SSE par préférence du cost model, pas par contrainte matérielle.
+**CPU features available but unused**: `rustc --print cfg -C target-cpu=native` reports `avx`, `avx2`, `fma` on Skylake/Kaby Lake. LLVM picks SSE based on the cost model, not on a hardware constraint.
 
-**Implication sur l'interprétation du throughput** : ~2,2 Gélém/s représente ~24 % du pic théorique SSE 128-bit (≈ 9 Gélém/s), pas 12 % du pic AVX2. La vectorisation est bien exploitée pour le mode choisi par LLVM.
+**Implication on throughput interpretation**: ~2.2 Gelem/s represents ~24 % of the theoretical SSE 128-bit peak (≈ 9 Gelem/s), not 12 % of the AVX2 peak. Vectorization is well exploited for the mode LLVM chose.
 
-**Optimisation supplémentaire disponible (non appliquée)** : forcer AVX2 ymm via `wide::f32x8` permettrait un gain estimé × 2 (702 ns → ~350 ns). Non fait car le budget actuel (1,4 µs total sur le chemin chaud) représente 3 % du budget de 50 µs — la marge est suffisante et ajouter une dépendance pour gratter 350 ns n'est pas justifié en l'état.
+**Additional optimization available (not applied)**: forcing AVX2 ymm via `wide::f32x8` would yield an estimated × 2 gain (702 ns → ~350 ns). Not done because the current budget (1.4 µs total on the hot path) is 3 % of the 50 µs budget — the margin is sufficient and adding a dependency to shave 350 ns is not justified as things stand.
 
-### Ce qui reste à faire pour un SLA sérieux
+### What remains for a serious SLA
 
-Ces chiffres sont suffisants pour valider l'architecture, pas pour signer un engagement. À compléter si demandé par le client :
+These numbers are enough to validate the architecture, not to sign a commitment. To complete if requested by the customer:
 
-1. Rebench sur hardware de prod avec fréquence CPU fixe (désactiver turbo boost et thermal throttling pour réduire la variance).
-2. Ajout d'un bench sur plus de tailles (512, 1024, 2048) si des modèles intermédiaires sont utilisés.
-3. Si latence sub-microseconde requise : passer à `wide::f32x8` pour forcer AVX2.
+1. Re-bench on production hardware with fixed CPU frequency (disable turbo boost and thermal throttling to reduce variance).
+2. Add a bench across more sizes (512, 1024, 2048) if intermediate models are used.
+3. If sub-microsecond latency is required: switch to `wide::f32x8` to force AVX2.
 
 ---
 
-## 2026-05-01 — Rebench Mac Studio M4 Max
+## 2026-05-01 — Mac Studio M4 Max re-bench
 
-Hardware : **Apple M4 Max**, 10 P-cores + 4 E-cores, 36 GiB RAM, macOS 25 (Darwin 25.3.0), arm64.
+Hardware: **Apple M4 Max**, 10 P-cores + 4 E-cores, 36 GiB RAM, macOS 25 (Darwin 25.3.0), arm64.
 
-Commande : `cargo bench --bench normalize` puis `cargo bench --bench alignment`
-Build : `rustc 1.95.0`, profil `bench` (opt-level=3), `.cargo/config.toml` → `-C target-cpu=native` (active NEON ARMv8 + ARMv8.6 FEAT_FP16, etc.)
-Criterion : 0.8.2
+Command: `cargo bench --bench normalize` then `cargo bench --bench alignment`
+Build: `rustc 1.95.0`, `bench` profile (opt-level=3), `.cargo/config.toml` → `-C target-cpu=native` (enables NEON ARMv8 + ARMv8.6 FEAT_FP16, etc.)
+Criterion: 0.8.2
 
-Aucune modification du code source par rapport au run précédent — même crate, même invariants. La seule variable est le hardware.
+No source code changes from the previous run — same crate, same invariants. The only variable is the hardware.
 
-### Résultats `l2_norm_squared` multi-tailles
+### `l2_norm_squared` results, multi-size
 
-| Dim | Min | Médiane | Max | Débit médian | Gain vs Kaby Lake (étape 5) |
+| Dim | Min | Median | Max | Median throughput | Gain vs Kaby Lake (step 5) |
 |---|---|---|---|---|---|
-| 256  | 22.6 ns | 22.7 ns | 22.8 ns | **11.27 Gélém/s** | **×5,2** |
-| 768  | 66.4 ns | 66.7 ns | 66.9 ns | **11.52 Gélém/s** | **×5,2** |
-| 1536 | 137.5 ns | 138.5 ns | 139.7 ns | **11.09 Gélém/s** | **×5,1** |
-| 3072 | 287.1 ns | 290.2 ns | 293.3 ns | **10.59 Gélém/s** | **×3,9** |
+| 256  | 22.6 ns | 22.7 ns | 22.8 ns | **11.27 Gelem/s** | **×5.2** |
+| 768  | 66.4 ns | 66.7 ns | 66.9 ns | **11.52 Gelem/s** | **×5.2** |
+| 1536 | 137.5 ns | 138.5 ns | 139.7 ns | **11.09 Gelem/s** | **×5.1** |
+| 3072 | 287.1 ns | 290.2 ns | 293.3 ns | **10.59 Gelem/s** | **×3.9** |
 
-Débit ~11 Gélém/s, stable sur les quatre tailles. La légère baisse à 3072 dims reflète la pression accrue sur le pipeline au-delà du sweet-spot du déroulage.
+Throughput ~11 Gelem/s, stable across the four sizes. The slight drop at 3072 dims reflects increased pressure on the pipeline beyond the unroll sweet spot.
 
-### Résultats `normalize_in_place` et alignement
+### `normalize_in_place` and alignment results
 
-| Bench | Médiane M4 Max | Médiane Kaby Lake | Gain |
+| Bench | M4 Max median | Kaby Lake median | Gain |
 |---|---|---|---|
-| `normalize_in_place_1536` | **189.4 ns** | 1.33 µs | **×7,0** |
-| `validate_and_align_aligned_1536` | **2.39 ns** | 14.4 ns | **×6,0** |
-| `validate_and_align_misaligned_1536` | **62.7 ns** | 207 ns | **×3,3** |
+| `normalize_in_place_1536` | **189.4 ns** | 1.33 µs | **×7.0** |
+| `validate_and_align_aligned_1536` | **2.39 ns** | 14.4 ns | **×6.0** |
+| `validate_and_align_misaligned_1536` | **62.7 ns** | 207 ns | **×3.3** |
 
-Le `validate_and_align` aligné descend à **~2,4 ns** : c'est essentiellement un check de longueur + un cast `bytemuck::try_cast_slice`, soit ~10 cycles à 4 GHz. Cohérent avec ce qu'on attend (pas d'allocation, pas de copie, pas de syscall). La copie en cas de désalignement reste limitée par la bande passante L1d → 6144 octets en 63 ns ≈ **97 GB/s**, conforme aux spécifications publiées des P-cores M4.
+Aligned `validate_and_align` drops to **~2.4 ns**: essentially a length check plus a `bytemuck::try_cast_slice` cast, about 10 cycles at 4 GHz. Consistent with expectations (no allocation, no copy, no syscall). The copy on misalignment remains bounded by L1d bandwidth → 6144 bytes in 63 ns ≈ **97 GB/s**, in line with the published M4 P-core specs.
 
-### Budget global recalculé sur le chemin chaud (1536 dims, aligné, normalisé)
+### Recomputed overall hot-path budget (1536 dims, aligned, normalized)
 
-| Étape | Latence M4 Max | Cumul |
+| Step | M4 Max latency | Cumulative |
 |---|---|---|
-| `validate_and_align` (aligné, zero-copy) | 2.4 ns | 2.4 ns |
+| `validate_and_align` (aligned, zero-copy) | 2.4 ns | 2.4 ns |
 | `l2_norm_squared` | 138.5 ns | 140.9 ns |
 | `normalize_in_place` | 189.4 ns | **330.3 ns** |
 
-**~0,33 µs** end-to-end pour le tronc math du pipeline, contre **~1,4 µs** sur Kaby Lake → gain global **×4,2**.
+**~0.33 µs** end-to-end for the math trunk of the pipeline, versus **~1.4 µs** on Kaby Lake → overall gain **×4.2**.
 
-Marge sur l'objectif de brief (< 50 µs par requête) : on consomme **0,7 % du budget** pour la partie math. Le reste (decode protobuf, lookup registre, call VDB, encodage réponse) tient largement dans les 49 µs restants.
+Margin against the brief's target (< 50 µs per request): we consume **0.7 % of the budget** for the math portion. The rest (protobuf decode, registry lookup, VDB call, response encode) fits comfortably in the remaining 49 µs.
 
-### Pourquoi un tel gain
+### Why such a gain
 
-Trois facteurs additifs, pas de magie :
+Three additive factors, no magic:
 
-1. **Fréquence et largeur d'issue.** P-cores M4 Max ~4,4 GHz boost vs i5-7360U @ 2,3 GHz nominal (parfois ~3,0 GHz boost mais avec throttling thermique sur laptop). Pipeline M4 Max sensiblement plus large (~10 instructions/cycle dispatchables) que les Kaby Lake mobile (~4-wide).
-2. **NEON 128-bit + ILP.** Le déroulage en huit accumulateurs parallèles introduit en étape 5 (initialement pour exploiter AVX2 sur Intel) tombe pile sur les unités vectorielles ARMv8 du M4 Max sans modification de code. LLVM régénère du `fmla v0.4s, v1.4s, v1.4s` qui sature les 4 ports SIMD.
-3. **Pas de thermal throttling.** Mac Studio en boîtier desktop, dissipation passive massive, fréquence CPU stable sur toute la durée du bench. Sur le laptop Kaby Lake la fréquence chute typiquement de 30 % après quelques secondes de charge soutenue.
+1. **Frequency and issue width.** M4 Max P-cores ~4.4 GHz boost vs i5-7360U @ 2.3 GHz nominal (occasionally ~3.0 GHz boost but with thermal throttling on a laptop). The M4 Max pipeline is noticeably wider (~10 dispatchable instructions/cycle) than Kaby Lake mobile (~4-wide).
+2. **NEON 128-bit + ILP.** The eight-accumulator unroll introduced in step 5 (originally to exploit AVX2 on Intel) maps directly onto the M4 Max ARMv8 vector units with no code change. LLVM regenerates `fmla v0.4s, v1.4s, v1.4s` that saturates the four SIMD ports.
+3. **No thermal throttling.** Mac Studio in a desktop enclosure, massive passive dissipation, CPU frequency stable for the entire bench. On the Kaby Lake laptop the frequency typically drops 30 % after a few seconds of sustained load.
 
-### Conséquence pour les engagements clients
+### Consequence for customer commitments
 
-Les chiffres précédents (Kaby Lake) restaient annoncés comme "indicatifs" précisément à cause du hardware vieux et thermiquement instable. Le run M4 Max donne une borne basse réaliste pour un serveur moderne :
+The previous numbers (Kaby Lake) were flagged as "indicative" precisely because of old, thermally unstable hardware. The M4 Max run provides a realistic lower bound for a modern server:
 
-- Sur **Apple Silicon (Mac mini M4, Mac Studio M4 Max, AWS Graviton4)** : on peut s'engager sur un hot path math < 500 ns à 99e percentile.
-- Sur **x86-64 serveur récent (Xeon Ice Lake, AMD Epyc Milan/Genoa)** : entre Kaby Lake et M4 Max, attendu autour de 0,5–0,8 µs.
-- Pour tout SLA contractuel, rebench sur le hardware exact de prod reste recommandé — les chiffres présents sont une preuve de concept, pas un engagement.
+- On **Apple Silicon (Mac mini M4, Mac Studio M4 Max, AWS Graviton4)**: we can commit to a math hot path < 500 ns at the 99th percentile.
+- On **recent x86-64 servers (Xeon Ice Lake, AMD Epyc Milan/Genoa)**: between Kaby Lake and M4 Max, expected around 0.5–0.8 µs.
+- For any contractual SLA, re-benching on the exact production hardware remains recommended — the numbers here are a proof of concept, not a commitment.
 
-### Leçons opérationnelles
+### Operational takeaways
 
-Sept conclusions transversales tirées de ce rebench, à garder en tête pour les itérations futures et les discussions client.
+Seven cross-cutting conclusions from this re-bench, to keep in mind for future iterations and customer conversations.
 
-**1. L'optimisation est portable, pas Intel-spécifique.** Le déroulage en 8 accumulateurs parallèles (étape 5) avait été pensé pour AVX2. Il rend exactement le même gain (×5,1 sur le débit) sur les unités NEON du M4 Max sans une ligne de code modifiée. La règle pour le crate : **exposer le parallélisme à LLVM**, pas écrire des intrinsics x86. Le code reste lisible, audit-able, et tourne partout (Apple Silicon, AWS Graviton, OCI Ampere, x86 récent).
+**1. The optimization is portable, not Intel-specific.** The eight-accumulator unroll (step 5) was designed for AVX2. It delivers exactly the same gain (×5.1 on throughput) on the M4 Max NEON units without one line of code changed. The rule for the crate: **expose parallelism to LLVM**, do not write x86 intrinsics. The code stays readable, auditable, and runs everywhere (Apple Silicon, AWS Graviton, OCI Ampere, recent x86).
 
-**2. Le thermal throttling cachait une partie du score Kaby Lake.** Mac Studio en boîtier desktop = fréquence stable sur toute la durée du bench. Le laptop Kaby Lake throttle ~30 % après quelques secondes de charge soutenue. Une partie du ×4,2 n'est pas "M4 Max plus rapide" mais "M4 Max non bridé". Conséquence pour un SLA : préciser le contexte thermique (boîtier, ventilo, durée de la fenêtre de mesure) — un même binaire sur un même CPU peut donner des résultats différents.
+**2. Thermal throttling was hiding part of the Kaby Lake score.** Mac Studio in a desktop enclosure = stable frequency for the entire bench. The Kaby Lake laptop throttles ~30 % after a few seconds of sustained load. Part of the ×4.2 is not "M4 Max is faster" but "M4 Max is not throttled". Consequence for an SLA: specify the thermal context (enclosure, fan, measurement window length) — the same binary on the same CPU can yield different results.
 
-**3. Le check IEEE 754 ne coûte rien à cette échelle.** À 11 Gélém/s, on sature les ports SIMD, pas la branche `is_finite`. La micro-optimisation envisagée (bitmask vectorisé sur les exposants pour détecter NaN/Inf) n'a plus aucune justification — gain négligeable, perte de lisibilité importante. Décision : **on n'y touche plus**.
+**3. The IEEE 754 check costs nothing at this scale.** At 11 Gelem/s, we saturate the SIMD ports, not the `is_finite` branch. The micro-optimization considered (vectorized bitmask on the exponents to detect NaN/Inf) no longer has any justification — negligible gain, significant loss of readability. Decision: **we leave it alone**.
 
-**4. `validate_and_align` aligné est devenu effectivement gratuit.** 2,4 ns ≈ 10 cycles à 4 GHz = check de longueur + cast `bytemuck::try_cast_slice`. À cette échelle, l'overhead **gRPC** (decode protobuf, lookup registre, encode réponse) domine entièrement le hot path math. Le prochain levier d'optimisation, s'il devient nécessaire, n'est ni dans `math.rs` ni dans `pool.rs`.
+**4. Aligned `validate_and_align` became effectively free.** 2.4 ns ≈ 10 cycles at 4 GHz = length check + `bytemuck::try_cast_slice` cast. At this scale, **gRPC** overhead (protobuf decode, registry lookup, response encode) entirely dominates the math hot path. The next optimization lever, should it become necessary, is neither in `math.rs` nor in `pool.rs`.
 
-**5. Le budget de 50 µs était surdimensionné.** On consomme **0,7 % du budget** pour la partie math sur M4 Max. Même la version naïve initiale tenait déjà l'objectif. Les deux itérations d'optimisation ne servaient pas à tenir le SLA — elles servaient à se donner une marge pour des cas futurs : vecteurs plus longs (3072+), batch streaming, hardware client défavorable. Important à se rappeler avant de relancer un troisième cycle d'optim.
+**5. The 50 µs budget was oversized.** We consume **0.7 % of the budget** for the math portion on M4 Max. Even the initial naive version already met the target. The two optimization iterations were not about meeting the SLA — they were about building margin for future cases: longer vectors (3072+), batch streaming, unfavorable customer hardware. Worth remembering before starting a third optimization cycle.
 
-**6. Argument commercial mieux borné.** On a maintenant deux points sur la courbe :
+**6. Better-bounded commercial argument.** We now have two points on the curve:
 
-- **Kaby Lake mobile 2017** (mauvais cas, thermique limitée) → ~1,4 µs.
-- **M4 Max desktop 2025** (bon cas, sans throttling) → ~330 ns.
+- **Kaby Lake mobile 2017** (worst case, thermally limited) → ~1.4 µs.
+- **M4 Max desktop 2025** (best case, no throttling) → ~330 ns.
 
-Ce qui permet de répondre à un prospect avec : "votre Xeon Ice Lake / Epyc Milan / Graviton tombera entre les deux, probablement vers 0,5–0,8 µs". Plus crédible que "2-3× meilleur sur du moderne", et plus facilement défendable en pré-production avec un rebench ciblé.
+This allows responding to a prospect with: "your Xeon Ice Lake / Epyc Milan / Graviton will land between the two, probably around 0.5–0.8 µs". More credible than "2–3× better on modern hardware", and easier to defend in pre-production with a targeted re-bench.
 
-**7. Apple Silicon = cible serveur réaliste.** Le bench tourne natif arm64. AWS Graviton, OCI Ampere, GCP Tau T2A sont des serveurs ARM en prod, déjà adoptés par les acheteurs cloud-natifs. Le crate compile sans modification. Argument **réduction de facture cloud** à ressortir aux prospects qui ont ces instances dans leur catalogue.
+**7. Apple Silicon = realistic server target.** The bench runs native arm64. AWS Graviton, OCI Ampere, GCP Tau T2A are ARM servers in production, already adopted by cloud-native buyers. The crate compiles without modification. A **cloud bill reduction** argument to surface for prospects who have these instances in their catalog.
 
-### Note sur le pipeline de release Tier 1/2
+### Note on the Tier 1/2 release pipeline
 
-Le M4 Max est excellent pour le développement et les benchmarks, mais la production des artefacts Linux x86-64 (Tier 1 binary, Tier 2 Docker image) ne peut **pas** se faire en émulation QEMU sur arm64 — `proc-macro2` build-script segfaute (SIGSEGV) sous l'émulation Colima/Lima. Le pipeline de release officiel doit donc tourner sur :
+The M4 Max is excellent for development and benchmarks, but producing Linux x86-64 artifacts (Tier 1 binary, Tier 2 Docker image) **cannot** be done via QEMU emulation on arm64 — the `proc-macro2` build-script segfaults (SIGSEGV) under Colima/Lima emulation. The official release pipeline must therefore run on:
 
-- une machine x86-64 native (Linux ou Mac Intel),
-- une CI Linux x86-64 (GitHub Actions runner standard `ubuntu-latest`),
-- ou Docker Desktop avec Rosetta 2 (qui gère mieux ce cas particulier que QEMU).
+- a native x86-64 machine (Linux or Intel Mac),
+- a Linux x86-64 CI (standard GitHub Actions `ubuntu-latest` runner),
+- or Docker Desktop with Rosetta 2 (which handles this particular case better than QEMU).
 
-Le `Makefile` est correct (`docker build --platform linux/amd64`) mais l'exécution doit avoir lieu dans un environnement compatible. Détail à intégrer au runbook avant la première vraie livraison Tier 1.
+The `Makefile` is correct (`docker build --platform linux/amd64`) but the execution must happen in a compatible environment. Detail to integrate into the runbook before the first real Tier 1 delivery.

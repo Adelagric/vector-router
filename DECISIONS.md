@@ -1,118 +1,118 @@
-# Décisions de conception
+# Design decisions
 
-Chaque entrée datée, motivée, et placée ici pour éviter de rejouer les mêmes arbitrages à froid.
+Each entry dated, motivated, and recorded here to avoid replaying the same trade-offs cold.
 
 ## 2026-04-17
 
-### Cargo workspace layout : lib + bin dans un seul crate
-Motif : `cargo build` avec `-D warnings` traite les fonctions non utilisées par `main.rs` comme du dead code. Exposer les modules en `pub mod` via `src/lib.rs` les rend API publique de la bibliothèque, ce qui stoppe les warnings et garde l'architecture propre (la bibliothèque sera aussi utilisable dans les tests d'intégration de `tests/`).
+### Cargo workspace layout: lib + bin in a single crate
+Rationale: `cargo build` with `-D warnings` treats functions not used by `main.rs` as dead code. Exposing modules as `pub mod` via `src/lib.rs` makes them the public API of the library, which stops the warnings and keeps the architecture clean (the library will also be usable in integration tests under `tests/`).
 
-### Box sur `figment::Error` dans l'enum `Error`
-Motif : clippy déclenche `result_large_err` dès qu'un `Result<_, Error>` est retourné. `figment::Error` pèse ~200 octets à cause de son `Vec` de traces de contexte, ce qui fait gonfler tout appelant. Le Box limite l'overhead à 8 octets. Perdu : un déréférencement supplémentaire sur le chemin d'erreur (négligeable, c'est le chemin d'exception).
+### Box on `figment::Error` in the `Error` enum
+Rationale: clippy fires `result_large_err` as soon as a `Result<_, Error>` is returned. `figment::Error` weighs ~200 bytes due to its `Vec` of context traces, which inflates every caller. The Box limits the overhead to 8 bytes. Lost: one extra dereference on the error path (negligible, this is the exception path).
 
-### tonic 0.14 vs 0.13 et découplage prost
-Motif : tonic 0.14 a scindé le support prost en deux crates — `tonic-prost` (runtime) et `tonic-prost-build` (codegen). On cible 0.14.5 pour profiter des améliorations et rester sur la génération la plus récente. L'utilisation : `tonic-prost-build::configure().compile_protos(...)` dans `build.rs`.
+### tonic 0.14 vs 0.13 and prost decoupling
+Rationale: tonic 0.14 split prost support into two crates — `tonic-prost` (runtime) and `tonic-prost-build` (codegen). We target 0.14.5 to benefit from the improvements and stay on the latest codegen. Usage: `tonic-prost-build::configure().compile_protos(...)` in `build.rs`.
 
-### `target-cpu=native` dans `.cargo/config.toml`
-Motif : autorise l'auto-vectorisation SIMD via AVX2/AVX512 selon la CPU de build. Inconvénient : le binaire n'est plus portable entre CPU families. Acceptable pour dev local ; pour Docker, on devra fixer une target explicite à l'étape 11.
+### `target-cpu=native` in `.cargo/config.toml`
+Rationale: enables SIMD auto-vectorization via AVX2/AVX512 depending on the build CPU. Downside: the binary is no longer portable across CPU families. Acceptable for local dev; for Docker, we will pin an explicit target at step 11.
 
 ## 2026-04-18
 
-### `rcu` (read-copy-update) plutôt que `Mutex<HashMap>` pour les updates du registre
-Motif : `ArcSwap::rcu` donne des updates lock-free avec retry implicite sur contention. Pour des mises à jour rares (admin, quelques par heure au plus) et des lectures fréquentes (chaque requête gRPC), c'est strictement supérieur à un `RwLock` — zéro attente côté lecteurs, contention nulle en régime nominal. Prix payé : la closure d'update peut être appelée plusieurs fois si un autre thread update en parallèle, mais c'est bénin (même résultat final).
+### `rcu` (read-copy-update) rather than `Mutex<HashMap>` for registry updates
+Rationale: `ArcSwap::rcu` provides lock-free updates with implicit retry on contention. For rare updates (admin, a few per hour at most) and frequent reads (every gRPC request), it is strictly superior to a `RwLock` — zero wait on the reader side, near-zero contention under nominal traffic. Price paid: the update closure can be called multiple times if another thread updates concurrently, but that is benign (same final result).
 
-### Test loom découplé de la primitive ArcSwap
-Motif : `arc-swap` a sa propre couverture loom interne. Reproduire cette couverture dans notre crate est coûteux et redondant. À la place, le test loom valide le *pattern* concurrent (snapshot via clone d'Arc + update via remplacement atomique) sur un modèle simplifié `Mutex<Arc<T>>`. Ce qu'on teste : notre logique de registre n'introduit pas de race au-delà de ce que la primitive garantit.
+### loom test decoupled from the ArcSwap primitive
+Rationale: `arc-swap` has its own internal loom coverage. Reproducing that coverage in our crate is costly and redundant. Instead, the loom test validates the *pattern* (snapshot via Arc clone + update via atomic replacement) on a simplified `Mutex<Arc<T>>` model. What we test: our registry logic introduces no race beyond what the primitive guarantees.
 
 ### `AlignedBuffer` via `Box<[u32]>` + `bytemuck::cast_slice`
-Motif : garantir un alignement 4 sur un buffer `u8` nécessite soit `unsafe` (interdit), soit un `repr(align(4))` wrapper, soit un stockage sur un type naturellement aligné (u32, f32, etc.). Le stockage u32 est le plus simple, sans unsafe, et la conversion vers `&[u8]` / `&[f32]` passe par `bytemuck` qui est safe. Coût : rien (u32 et u8 ont la même représentation mémoire).
+Rationale: guaranteeing alignment 4 on a `u8` buffer requires either `unsafe` (forbidden), a `repr(align(4))` wrapper, or storage on a naturally aligned type (u32, f32, etc.). u32 storage is the simplest, without unsafe, and conversion to `&[u8]` / `&[f32]` goes through `bytemuck` which is safe. Cost: nothing (u32 and u8 share the same memory representation).
 
-### `PooledBuffer` : `mem::take` avec sentinelle `AlignedBuffer::default()` au lieu de `Option`
-Motif : l'invariant « PooledBuffer possède toujours un buffer valide jusqu'à Drop » s'exprime naturellement avec un champ `buffer: AlignedBuffer` (pas `Option<...>`). Dans Drop, `mem::take` échange le buffer avec un `AlignedBuffer::default()` (empty slice, zéro alloc). Ça évite un `Option::unwrap` / `.expect` dans `Deref`, qui serait interdit par les règles du projet.
+### `PooledBuffer`: `mem::take` with `AlignedBuffer::default()` sentinel instead of `Option`
+Rationale: the invariant "PooledBuffer always owns a valid buffer until Drop" expresses itself naturally with a `buffer: AlignedBuffer` field (not `Option<...>`). In Drop, `mem::take` swaps the buffer with an `AlignedBuffer::default()` (empty slice, zero alloc). This avoids an `Option::unwrap` / `.expect` in `Deref`, which would be forbidden by project rules.
 
-### Miri + alignement stack
-Motif (trace d'un bug rencontré) : miri ne garantit pas les alignements stack au-delà de ce que le type demande. Un `[u8; 17]` n'est aligné qu'à 1 octet sous miri, même si stack-allocator natif l'alignerait à 16. Les tests de désalignement doivent donc forcer un alignement de base via un type u32 (ou repr(align(4))), puis prendre un offset de 1 à l'intérieur.
+### Miri + stack alignment
+Rationale (trace of a bug encountered): miri does not guarantee stack alignments beyond what the type requests. A `[u8; 17]` is only 1-byte aligned under miri, even though a native stack allocator would align it to 16. Misalignment tests must therefore force a base alignment via a u32 type (or `repr(align(4))`), then take an offset of 1 inside it.
 
-### Benches étendus comme « tests » pour la règle unwrap/expect
-Motif : le brief interdit `unwrap`/`expect` hors `main.rs`, `tests/`, `build.rs`. Les fichiers `benches/` sont sémantiquement des tests (de performance). On étend la règle à benches/, ce qui permet l'usage idiomatique de `unwrap` pour les préconditions de bench et l'assertion de sanité.
+### Benches extended as "tests" for the unwrap/expect rule
+Rationale: the brief forbids `unwrap`/`expect` outside `main.rs`, `tests/`, `build.rs`. Files under `benches/` are semantically tests (of performance). We extend the rule to `benches/`, which allows idiomatic `unwrap` use for bench preconditions and sanity assertions.
 
-### Réécriture de `l2_norm_squared` avec huit accumulateurs parallèles (branchless + déroulage manuel)
-Motif : la version initiale fusionnait validation NaN/Inf et somme des carrés dans une boucle unique avec branche (`if !x.is_finite() return Err`). Cette branche empêchait l'auto-vectorisation SIMD par LLVM, donnant ~4.4 µs pour 1536 dims (vitesse scalaire pure, ~3 % du pic AVX2). Deux itérations successives : (1) passage branchless en exploitant la propagation IEEE 754 (NaN/Inf propagent à travers `*` et `+`), vérification de la finitude de la somme en sortie → gain ×2.1. (2) huit accumulateurs indépendants via `chunks_exact(8)` et déroulage manuel, pour briser la chaîne de dépendance séquentielle de la réduction sans violer l'associativité stricte IEEE 754 → gain supplémentaire ×3, total ×6.3. Résultat : 702 ns médiane pour 1536 dims, débit ~2.2 Gélém/s (voir `BENCHES.md`). Aucun `unsafe`, aucun recours à `-C fast-math`, miri vert, correction numérique préservée.
+### Rewriting `l2_norm_squared` with eight parallel accumulators (branchless + manual unroll)
+Rationale: the initial version fused NaN/Inf validation and sum of squares in a single branched loop (`if !x.is_finite() return Err`). That branch prevented LLVM's SIMD auto-vectorization, yielding ~4.4 µs for 1536 dims (pure scalar speed, ~3 % of the AVX2 peak). Two successive iterations: (1) branchless conversion exploiting IEEE 754 propagation (NaN/Inf propagate through `*` and `+`), checking the finiteness of the sum at the end → ×2.1 gain. (2) eight independent accumulators via `chunks_exact(8)` and manual unroll, to break the sequential reduction dependency chain without violating strict IEEE 754 associativity → an extra ×3 gain, total ×6.3. Result: 702 ns median for 1536 dims, throughput ~2.2 Gelem/s (see `BENCHES.md`). No `unsafe`, no `-C fast-math`, miri green, numerical correctness preserved.
 
-### Dockerfile multi-stage avec `gcr.io/distroless/cc-debian12:nonroot`
-Motif : image de base minimale (~27 Mo), pas de shell, pas de package manager — surface d'attaque réduite. Variante `:nonroot` pour respecter le principe du moindre privilège en conteneur. Alternative envisagée (distroless/static-debian12) rejetée : demanderait de compiler en musl avec target `-musl`, lourd et bénéfice marginal vu qu'on a déjà besoin de `libc` pour les déps transitives.
+### Multi-stage Dockerfile with `gcr.io/distroless/cc-debian12:nonroot`
+Rationale: minimal base image (~27 MB), no shell, no package manager — reduced attack surface. `:nonroot` variant to respect the principle of least privilege inside the container. Alternative considered (distroless/static-debian12) rejected: would require compiling against musl with target `-musl`, heavy and marginal benefit since we already need `libc` for transitive deps.
 
-### Désactivation de `target-cpu=native` dans le build Docker
-Motif : `.cargo/config.toml` local utilise `-C target-cpu=native` pour exploiter les features CPU du builder (AVX2/FMA). Un binaire produit avec ce flag ne tournerait que sur une CPU identique. Dans le Dockerfile, on remplace explicitement ce fichier par un équivalent `-C target-cpu=x86-64-v3` (Haswell+, couvre la quasi-totalité des CPU serveurs depuis 2013). Compromis : on perd potentiellement 10-20 % de perf SIMD vs native sur un serveur récent, pour la portabilité du binaire.
+### Disabling `target-cpu=native` in the Docker build
+Rationale: local `.cargo/config.toml` uses `-C target-cpu=native` to exploit the builder's CPU features (AVX2/FMA). A binary produced with that flag would only run on an identical CPU. In the Dockerfile we explicitly replace this file with an equivalent using `-C target-cpu=x86-64-v3` (Haswell+, covers almost all server CPUs since 2013). Trade-off: we potentially lose 10–20 % SIMD perf vs native on a recent server, in exchange for binary portability.
 
-### Shutdown via `tokio::sync::broadcast` plutôt que `Notify` ou `CancellationToken`
-Motif : trois tâches indépendantes (gRPC, HTTP, gauge updater) doivent recevoir le signal d'arrêt simultanément. `broadcast::Sender<()>` offre ça nativement : un `.send(())` réveille tous les `.subscribe()`. `Notify::notify_waiters()` pose un problème de fenêtre (les subscribers qui s'abonnent après notify ne voient rien), `tokio_util::sync::CancellationToken` ajouterait une dépendance pour un usage trivial. `broadcast` coche toutes les cases : natif tokio, multi-consumer, un seul send.
+### Shutdown via `tokio::sync::broadcast` rather than `Notify` or `CancellationToken`
+Rationale: three independent tasks (gRPC, HTTP, gauge updater) need to receive the shutdown signal simultaneously. `broadcast::Sender<()>` provides that natively: a `.send(())` wakes every `.subscribe()`. `Notify::notify_waiters()` has a window problem (subscribers who subscribe after the notify see nothing), `tokio_util::sync::CancellationToken` would add a dependency for a trivial use case. `broadcast` ticks every box: native to tokio, multi-consumer, a single send.
 
-Variantes testées : `service_starts_and_shuts_down_cleanly` (flux nominal), `shutdown_propagates_to_all_tasks_in_order` (drain < 1s alors que le gauge updater tick à 5s — prouve que `tokio::select!` interrompt bien), `drain_timeout_is_reported` (force un scénario tâche-qui-hang via `shutdown_tx.clone()` gardé alive, vérifie que le timeout remonte une erreur explicite).
+Variants tested: `service_starts_and_shuts_down_cleanly` (nominal flow), `shutdown_propagates_to_all_tasks_in_order` (drain < 1s even though the gauge updater ticks every 5s — proves that `tokio::select!` interrupts correctly), `drain_timeout_is_reported` (forces a stuck-task scenario via `shutdown_tx.clone()` kept alive, verifies that the timeout surfaces an explicit error).
 
-### `start_service` vs `start_service_with_vdb` — factorisation pour testabilité
-Motif : la version prod instancie `QdrantVdbClient` à partir de la config, ce qui rend le code non testable sans une vraie instance Qdrant. Extraction d'une variante `start_service_with_vdb(…, vdb: Arc<dyn VectorDbClient>, …)` qui accepte un VDB préconstruit. Les tests injectent `MockVdbClient` ; la prod passe par la première variante qui compose les deux. Pas de logique dupliquée, pas de generics inutiles, aucune régression sur l'API publique.
+### `start_service` vs `start_service_with_vdb` — refactor for testability
+Rationale: the prod version instantiates `QdrantVdbClient` from the config, which makes the code untestable without a real Qdrant instance. Extracted a `start_service_with_vdb(…, vdb: Arc<dyn VectorDbClient>, …)` variant that accepts a pre-built VDB. Tests inject `MockVdbClient`; prod goes through the first variant which composes the two. No duplicated logic, no useless generics, no regression on the public API.
 
-### Métrique de saturation VDB via `inflight()` sur le trait (pas d'accès aux pools internes)
-Motif : `qdrant-client` n'expose pas l'état de son pool de connexions (géré par hyper/tonic en interne, pas d'API publique). Pour obtenir une métrique de saturation utilisable en prod, ajout d'une méthode `fn inflight(&self) -> u64` au trait `VectorDbClient` avec implémentation par défaut (retourne 0 pour backends qui ne tracent pas). `QdrantVdbClient` la surcharge via son `AtomicU64` incrémenté/décrémenté par `InflightGuard` (RAII). C'est une métrique applicative ("combien d'appels le middleware a envoyé et attend"), pas le vrai nombre de connexions gRPC — mais suffisant pour détecter la pression downstream dans Grafana.
+### VDB saturation metric via `inflight()` on the trait (no access to internal pools)
+Rationale: `qdrant-client` does not expose its connection pool state (managed by hyper/tonic internally, no public API). To produce a saturation metric usable in prod, we added an `fn inflight(&self) -> u64` method to the `VectorDbClient` trait with a default implementation (returns 0 for backends that do not track this). `QdrantVdbClient` overrides it via its `AtomicU64` incremented/decremented by `InflightGuard` (RAII). It is an application metric ("how many calls the middleware has sent and is waiting on"), not the true number of gRPC connections — but enough to detect downstream pressure in Grafana.
 
-### Gauges mis à jour par tâche périodique (5s) plutôt qu'à chaque événement
-Motif : `registered_models`, `pool_available`, `vdb_inflight` sont des valeurs lues depuis l'état applicatif (`Registry::len`, `BufferPool::available`, `VectorDbClient::inflight`). Les émettre à chaque changement multiplierait le coût sans bénéfice (Prometheus scrape au mieux toutes les 10-15s). Choix : tâche background `telemetry::run_gauge_updater` qui lit et pousse toutes les 5s. Latence d'observation max ~5s, largement suffisante pour un dashboard.
+### Gauges updated by periodic task (5s) rather than on every event
+Rationale: `registered_models`, `pool_available`, `vdb_inflight` are values read from application state (`Registry::len`, `BufferPool::available`, `VectorDbClient::inflight`). Emitting them on every change would multiply the cost without benefit (Prometheus scrapes every 10–15s at best). Choice: a background task `telemetry::run_gauge_updater` that reads and pushes every 5s. Max observation latency ~5s, more than enough for a dashboard.
 
-### Fix : routage `point_id` → `Num` ou `Uuid` selon le format (bug révélé par stress test 2026-04-20)
-**Bug** : dans l'implémentation Qdrant initiale, `params.point_id` (String) était systématiquement enveloppé dans `PointIdOptions::Uuid(...)`. Qdrant n'accepte que deux formats d'ID : `u64` ou UUID en string. Un `point_id` arbitraire type `"doc-bench"` faisait échouer la requête côté Qdrant avec `"Unable to parse UUID"`, remonté en `Error::Vdb(...)` avec status gRPC `Unavailable`.
+### Fix: `point_id` routing → `Num` or `Uuid` depending on format (bug surfaced by 2026-04-20 stress test)
+**Bug**: in the initial Qdrant implementation, `params.point_id` (String) was systematically wrapped in `PointIdOptions::Uuid(...)`. Qdrant only accepts two ID formats: `u64` or UUID-as-string. An arbitrary `point_id` like `"doc-bench"` made the Qdrant request fail with `"Unable to parse UUID"`, surfaced as `Error::Vdb(...)` with gRPC status `Unavailable`.
 
-**Non détecté par les tests** : le `MockVdbClient` accepte n'importe quelle String comme `point_id`. Aucune validation du format côté mock. Les 72 tests (unit + intégration + spike + miri) étaient tous verts malgré ce bug.
+**Not caught by tests**: `MockVdbClient` accepts any String as `point_id`. No format validation on the mock side. All 72 tests (unit + integration + spike + miri) were green despite this bug.
 
-**Révélé par** : un stress test avec `ghz` contre un vrai Qdrant en Docker local. 2000 requêtes, 100 % `Unavailable`, avec le message Qdrant explicite en clair dans la réponse.
+**Surfaced by**: a stress test with `ghz` against a real Qdrant running locally in Docker. 2000 requests, 100 % `Unavailable`, with Qdrant's explicit message in plain text in the response.
 
-**Fix** : fonction `point_id_from_string(s: String) -> PointId` qui tente `s.parse::<u64>()` d'abord. Si ça passe → `PointIdOptions::Num(n)`. Sinon → `PointIdOptions::Uuid(s)`. Qdrant valide ensuite lui-même si c'est un UUID valide, et remonte son erreur au client si ce n'est ni u64 ni UUID — on ne masque rien côté middleware.
+**Fix**: a `point_id_from_string(s: String) -> PointId` function that tries `s.parse::<u64>()` first. If it succeeds → `PointIdOptions::Num(n)`. Otherwise → `PointIdOptions::Uuid(s)`. Qdrant then validates itself whether it is a valid UUID, and surfaces its error to the client if it is neither u64 nor UUID — we hide nothing on the middleware side.
 
-**Leçon documentée** : les tests avec mock ne couvrent que la logique applicative, pas les contrats externes. Tout composant qui parle à une dépendance externe critique (VDB, LLM, broker) doit avoir au moins un test d'intégration contre la vraie chose en CI. À ajouter dans une itération future : un test `#[cfg(feature = "integration-qdrant")]` qui spin-up Qdrant en testcontainers et exerce les cas limites (ID numérique, UUID valide, string arbitraire, metadata complexe).
+**Lesson documented**: mock-based tests only cover application logic, not external contracts. Any component that talks to a critical external dependency (VDB, LLM, broker) must have at least one integration test against the real thing in CI. To add in a future iteration: a `#[cfg(feature = "integration-qdrant")]` test that spins up Qdrant in testcontainers and exercises the edge cases (numeric ID, valid UUID, arbitrary string, complex metadata).
 
-**Tests ajoutés** : `point_id_from_numeric_string_becomes_num`, `point_id_from_uuid_string_becomes_uuid`, `point_id_from_arbitrary_string_becomes_uuid_then_rejected_by_qdrant` dans `src/client/qdrant.rs`.
+**Tests added**: `point_id_from_numeric_string_becomes_num`, `point_id_from_uuid_string_becomes_uuid`, `point_id_from_arbitrary_string_becomes_uuid_then_rejected_by_qdrant` in `src/client/qdrant.rs`.
 
-### Dashboard HTML minimal embarqué à `/dashboard` — révision du 2026-04-20
-Décision initiale (voir ci-dessous) : pas de dashboard HTML embarqué, Grafana comme seul outil de visualisation. Cette règle tenait tant que le but était la production.
+### Minimal embedded HTML dashboard at `/dashboard` — revised on 2026-04-20
+Initial decision (see below): no embedded HTML dashboard, Grafana as the only visualization tool. That rule held as long as the goal was production.
 
-**Révision** : après validation du projet, le besoin commercial est apparu — un artefact de démo visuel pour les appels prospect de 30 min, où Grafana demande un setup trop lourd (Prometheus + datasource + import JSON). Ajout d'une page HTML statique servie à `GET /dashboard`, embarquée via `include_str!("../../static/dashboard.html")`.
+**Revision**: after the project was validated, a commercial need emerged — a visual demo artifact for 30-minute prospect calls, where Grafana requires too heavy a setup (Prometheus + datasource + JSON import). Added a static HTML page served at `GET /dashboard`, embedded via `include_str!("../../static/dashboard.html")`.
 
-Garde-fous pour éviter de retomber dans les pièges de la décision initiale :
-- **Contenu 100 % truthful** : métriques RED temps réel scrapées depuis `/metrics`, chiffres de tests et benches hardcodés à jour. Zéro KPI inventé type "Bypass ROI".
-- **Pas d'input utilisateur affiché** : surface XSS nulle, la page ne lit que des noms de métriques Prometheus déjà produits par l'application elle-même.
-- **Impact taille binaire** : +11 Ko dans l'image Docker. Zéro impact pratique.
-- **Positionnement explicite** : le footer de la page indique « Tableau de bord local pour démonstration · Observabilité production via Grafana ». Jamais présenté comme un remplacement de Grafana.
+Guardrails to avoid falling back into the traps of the initial decision:
+- **100 % truthful content**: real-time RED metrics scraped from `/metrics`, hardcoded test and bench numbers kept current. Zero made-up KPI like "Bypass ROI".
+- **No user input displayed**: XSS surface zero, the page only reads Prometheus metric names already produced by the application itself.
+- **Binary size impact**: +11 KB in the Docker image. Zero practical impact.
+- **Explicit positioning**: the page footer states "Local dashboard for demonstration · Production observability via Grafana". Never presented as a replacement for Grafana.
 
-Fichier source : `static/dashboard.html` (HTML + CSS + JS inline, zéro dépendance externe). Endpoint : `GET /dashboard` dans `src/server/http.rs`. Test d'intégration : `dashboard_returns_html_with_expected_sections`.
+Source file: `static/dashboard.html` (HTML + CSS + JS inline, zero external dependencies). Endpoint: `GET /dashboard` in `src/server/http.rs`. Integration test: `dashboard_returns_html_with_expected_sections`.
 
-### Pas de dashboard HTML embarqué — décision initiale (annulée le 2026-04-20)
-Motif initial : proposition (dashboard UI Tailwind embarqué) rejetée — doublerait Grafana, ajoute une surface d'attaque XSS, augmente la taille binaire, s'éloigne du standard SRE. Conservée tant que le scope est strictement production. Cf. révision ci-dessus pour le besoin démo qui a justifié l'ajout d'un dashboard minimal.
+### No embedded HTML dashboard — initial decision (overturned on 2026-04-20)
+Initial rationale: proposal (embedded Tailwind UI dashboard) rejected — would duplicate Grafana, add an XSS attack surface, increase binary size, deviate from the SRE standard. Kept as long as scope is strictly production. See the revision above for the demo need that justified adding a minimal dashboard.
 
-### Double `tonic` dans l'arbre de dépendances (accepté)
-Motif : `qdrant-client` 1.12 (et 1.17 latest) embarque `tonic 0.12 + prost 0.13` en interne. Notre serveur gRPC utilise `tonic 0.14.5 + prost 0.14.3`. Les deux versions coexistent dans le binaire sans interop au niveau des types (qdrant-client encapsule sa couche gRPC, notre service expose sa propre API). Choix retenu : garder les deux en parallèle plutôt que downgrade massif (coût : +1-2 Mo binaire, +temps de compilation ; alternative : 1-3 j de rework sur les fondations validées). À revisiter si `qdrant-client` migre en 0.14 dans une version future.
+### Double `tonic` in the dependency tree (accepted)
+Rationale: `qdrant-client` 1.12 (and the latest 1.17) ships `tonic 0.12 + prost 0.13` internally. Our gRPC server uses `tonic 0.14.5 + prost 0.14.3`. Both versions coexist in the binary without type-level interop (qdrant-client encapsulates its gRPC layer, our service exposes its own API). Choice retained: keep both in parallel rather than a massive downgrade (cost: +1–2 MB binary, +compile time; alternative: 1–3 days of rework on validated foundations). To revisit if `qdrant-client` migrates to 0.14 in a future release.
 
-### `VectorDbClient` comme trait générique plutôt que type concret
-Motif : une interface stable entre le handler gRPC et le backend VDB facilite (1) les tests du handler via `MockVdbClient` (hand-rolled dans `client::mock`, pas de dépendance mockall), (2) l'ajout ultérieur de backends (Pinecone, Weaviate, pgvector) sans toucher au code applicatif. Risque YAGNI accepté : l'abstraction coûte ~30 lignes, le bénéfice de testabilité est immédiat.
+### `VectorDbClient` as a generic trait rather than a concrete type
+Rationale: a stable interface between the gRPC handler and the VDB backend makes it easier (1) to test the handler via `MockVdbClient` (hand-rolled in `client::mock`, no mockall dependency), (2) to add later backends (Pinecone, Weaviate, pgvector) without touching application code. YAGNI risk accepted: the abstraction costs ~30 lines, the testability benefit is immediate.
 
-### Mock VDB hand-rolled plutôt que wiremock pour les tests
-Motif : `wiremock-rs` est orienté HTTP/REST. `qdrant-client` 1.12 utilise gRPC en premier. Faire un mock gRPC complet du proto Qdrant aurait coûté 1-2 jours et introduit une deuxième dépendance au schéma Qdrant. À la place, `MockVdbClient` dans `client::mock` (gated `#[cfg(test)]`, ~40 lignes) couvre les handler tests de l'étape 7 avec une API contrôlable. Le vrai client Qdrant est testé par construction + timeout + RAII `inflight_guard`, sans appel réseau réel.
+### Hand-rolled mock VDB rather than wiremock for tests
+Rationale: `wiremock-rs` is HTTP/REST-oriented. `qdrant-client` 1.12 uses gRPC first. Building a complete gRPC mock of the Qdrant proto would have cost 1–2 days and introduced a second dependency on the Qdrant schema. Instead, `MockVdbClient` in `client::mock` (gated `#[cfg(test)]`, ~40 lines) covers the step-7 handler tests with a controllable API. The real Qdrant client is tested by construction + timeout + RAII `inflight_guard`, without any real network call.
 
-### `InflightGuard` pour la métrique de saturation VDB
-Motif : `qdrant-client` n'expose pas l'état interne de son pool de connexions (géré par hyper/tonic). Pour mesurer la saturation applicative, on incrémente/décrémente un `AtomicU64::inflight` via une garde RAII autour de chaque appel. Cohérent même sur chemin d'erreur (le `Drop` est exécuté). Plan A du brief initial.
+### `InflightGuard` for the VDB saturation metric
+Rationale: `qdrant-client` does not expose the internal state of its connection pool (managed by hyper/tonic). To measure application-level saturation, we increment/decrement an `AtomicU64::inflight` via a RAII guard around each call. Consistent even on the error path (the `Drop` runs). Plan A from the initial brief.
 
-### Pas de retry exponentiel dans le client VDB (remonté au handler)
-Motif : un retry qui duplique les params (`UpsertParams` contient `Vec<f32>` de 1536 × 4 = 6 Ko) au niveau client forcerait des clones coûteux sur chaque retry, même en régime nominal où la majorité des appels réussissent au premier essai. Mieux : laisser le handler gRPC (étape 7) construire les params une fois et piloter sa propre politique de retry en appelant le client plusieurs fois avec les mêmes params réutilisés. Le client reste donc "one-shot" : un appel, une réponse, un timeout strict.
+### No exponential retry in the VDB client (pushed up to the handler)
+Rationale: a retry that duplicates the params (`UpsertParams` holds a `Vec<f32>` of 1536 × 4 = 6 KB) at the client level would force expensive clones on every retry, even under nominal traffic where most calls succeed on the first try. Better: let the gRPC handler (step 7) build the params once and drive its own retry policy by calling the client multiple times with the same reused params. The client therefore stays "one-shot": one call, one response, one strict timeout.
 
-### Ajout du RPC Search au proto (hors scope initial du brief)
-Motif : le brief initial couvrait uniquement `Upsert`, mais la cohérence du système impose que le vecteur de requête subisse exactement la même transformation (validation + normalisation) que les vecteurs stockés. Si le client appelle Qdrant directement pour la recherche sans passer par le middleware, il saute la normalisation et introduit un biais systématique sur les scores. Ajout d'un RPC `Search` qui partage le pipeline avec `Upsert`, diffère uniquement à l'étape 7 (appel `search_points` au lieu de `upsert_points`). Coût additionnel estimé : 0,5 jour dans l'étape 7. La métrique `requests_total` gagne un label `op ∈ {upsert, search}`.
+### Adding the Search RPC to the proto (out of initial brief scope)
+Rationale: the initial brief only covered `Upsert`, but system consistency requires the query vector to undergo the same transformation (validation + normalization) as the stored vectors. If the client calls Qdrant directly for search without going through the middleware, it skips normalization and introduces a systematic bias on the scores. Added a `Search` RPC that shares the pipeline with `Upsert`, diverging only at step 7 (calling `search_points` instead of `upsert_points`). Estimated additional cost: 0.5 day in step 7. The `requests_total` metric gains an `op ∈ {upsert, search}` label.
 
-### 2026-04-21 — `producer_id` + journal de rejet structuré + licence Ed25519
-Motif : trois chantiers en un sprint pour rendre le middleware distribuable commercialement avec traçabilité forensique et protection offline.
+### 2026-04-21 — `producer_id` + structured rejection journal + Ed25519 license
+Rationale: three pieces in one sprint to make the middleware commercially distributable with forensic traceability and offline protection.
 
-**Producer attribution** (`producer_id` sur `UpsertRequest`/`SearchRequest`) : champ proto3 optionnel (champs 6 et 7) ajouté en append backward-compatible. Vide => "unknown" côté métriques. Devient un label de `requests_total` et `request_duration_seconds` aux côtés de `model_id`, `op`, `status`. Cardinalité bornée contractuellement par le client (nom de service, pas d'UUID) — documenté dans le proto. Permet d'identifier quel producteur envoie des vecteurs mal formés sans tracing distribué.
+**Producer attribution** (`producer_id` on `UpsertRequest`/`SearchRequest`): optional proto3 field (fields 6 and 7) added as a backward-compatible append. Empty => "unknown" on the metrics side. Becomes a label on `requests_total` and `request_duration_seconds` alongside `model_id`, `op`, `status`. Cardinality bounded contractually by the client (service name, no UUID) — documented in the proto. Allows identifying which producer is sending malformed vectors without distributed tracing.
 
-**Journal de rejet structuré (JSON Lines sur stderr)** : émis uniquement en cas de rejet à la validation (`unknown_model`, `invalid_dim`, `invalid_numeric`). Contient `{event, op, producer_id, model_id, status, reason}`. Choix de stderr pour ne pas polluer une sortie structurée applicative éventuelle. Séparé des métriques : agrégation vs granularité unitaire pour post-mortem `grep | jq`. Pas de trace ID : c'est un outil de debug, pas un audit trail.
+**Structured rejection journal (JSON Lines on stderr)**: emitted only on validation rejection (`unknown_model`, `invalid_dim`, `invalid_numeric`). Contains `{event, op, producer_id, model_id, status, reason}`. Chose stderr so as not to pollute a potential structured application stdout. Separated from metrics: aggregation vs unit granularity for post-mortem `grep | jq`. No trace ID: this is a debug tool, not an audit trail.
 
-**Tests** : ajouts unitaires (`normalize_producer` côté gRPC) + intégration. Clippy `-D warnings` vert.
+**Tests**: unit additions (`normalize_producer` on the gRPC side) + integration. Clippy `-D warnings` green.
 
-> **Note historique** : une couche de licence runtime signée Ed25519 (claims signés, clé publique embarquée via `include_bytes!`, mode évaluation 45 jours) a été développée puis retirée lors du passage en Apache 2.0. Le code reste accessible dans l'historique git pour quiconque voudrait reconstruire un gating pour son fork enterprise.
+> **Historical note**: a runtime license layer signed with Ed25519 (signed claims, public key embedded via `include_bytes!`, 45-day evaluation mode) was developed then removed when moving to Apache 2.0. The code remains accessible in the git history for anyone who wants to rebuild gating for their enterprise fork.
