@@ -8,10 +8,13 @@ on:
 
 jobs:
   verify:
-    name: fmt + clippy + tests (samples publics)
+    name: fmt + clippy + tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
 
       - name: Toolchain stable + clippy + rustfmt
         uses: dtolnay/rust-toolchain@stable
@@ -25,7 +28,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy -D warnings
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: cargo test
-        run: cargo test --all-targets
+        run: cargo test --all-targets --locked
