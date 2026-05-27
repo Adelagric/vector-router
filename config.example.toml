@@ -1,8 +1,8 @@
-# Configuration de référence du middleware vector-router.
+# Reference configuration for the vector-router middleware.
 #
-# Chemin par défaut : ./config.toml (overridable via VR_CONFIG_PATH).
-# Tous les champs sont surchargeables par variable d'env préfixée `VR_`,
-# séparateur `__` pour les sous-champs. Exemple :
+# Default path: ./config.toml (overridable via VR_CONFIG_PATH).
+# Every field can be overridden by an env var prefixed `VR_`,
+# separator `__` for sub-fields. Example:
 #   VR_SERVER__GRPC_BIND="0.0.0.0:50051"
 #   VR_ADMIN__BEARER_TOKEN="..."
 #   VR_VDB__URL="http://qdrant.prod:6334"
@@ -10,41 +10,41 @@
 [server]
 grpc_bind = "0.0.0.0:50051"
 http_bind = "0.0.0.0:9090"
-# Requêtes simultanées max (rate limit via ConcurrencyLimitLayer).
+# Max concurrent requests (rate limit via ConcurrencyLimitLayer).
 max_concurrent_requests = 1024
-# Taille max d'un message gRPC entrant, en octets. Rejet avant parsing.
+# Max incoming gRPC message size, in bytes. Rejected before parsing.
 max_decoding_message_size_bytes = 16_777_216
 
 [admin]
-# Token bearer pour les endpoints /admin/* (comparaison temps constant).
-# En prod, injecter via secret manager — pas en dur dans le TOML committé.
+# Bearer token for the /admin/* endpoints (constant-time comparison).
+# In prod, inject via a secret manager — not hardcoded in the committed TOML.
 bearer_token = "change-me-in-production"
 
 [vdb]
 url = "http://qdrant:6334"
-# Optionnel : clé API Qdrant. Laisse vide pour auth désactivée.
+# Optional: Qdrant API key. Leave empty to disable auth.
 # api_key = "your-key"
 timeout_ms = 500
 max_retries = 3
 retry_base_delay_ms = 50
 
 [pool]
-# Nombre de buffers par worker tokio (N = buffers_per_worker × nb_workers).
+# Number of buffers per tokio worker (N = buffers_per_worker × n_workers).
 buffers_per_worker = 2
-# Nombre de workers tokio. Non défini = détection auto (num cores).
+# Number of tokio workers. Unset = auto-detect (num cores).
 # worker_threads = 8
 
 [telemetry]
 log_level = "info"
-# Optionnel : endpoint OTLP pour export des traces.
+# Optional: OTLP endpoint for trace export.
 # otlp_endpoint = "http://otel-collector:4317"
 
-# --- Modèles déclarés -------------------------------------------------------
-# Chaque modèle produit des vecteurs d'une dimension fixe, avec ou sans
-# normalisation, et cible un namespace (collection) Qdrant dédié.
+# --- Declared models --------------------------------------------------------
+# Each model produces vectors of a fixed dimension, with or without
+# normalization, and targets a dedicated Qdrant namespace (collection).
 #
-# Un modèle non déclaré = requête rejetée avec UnknownModel. Pas de
-# découverte automatique.
+# An undeclared model = request rejected with UnknownModel. No automatic
+# discovery.
 
 [models."openai-text-embedding-3-small"]
 dim = 1536

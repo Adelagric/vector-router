@@ -1,23 +1,23 @@
-//! Orchestration du cycle de vie : démarrage des trois tâches (gRPC, HTTP,
-//! gauge updater), coordination du shutdown via `tokio::sync::broadcast`,
-//! drain borné par timeout.
+//! Lifecycle orchestration: starts the three tasks (gRPC, HTTP, gauge
+//! updater), coordinates shutdown via `tokio::sync::broadcast`, drains
+//! bounded by timeout.
 //!
-//! Architecture du shutdown :
-//! - Un unique `broadcast::Sender<()>` possédé par `main` est cloné pour
-//!   chaque tâche via `.subscribe()`. Signal unique, écoute multiple, pas de
-//!   réinvention de la roue.
-//! - `serve_with_shutdown` (tonic) et `with_graceful_shutdown` (axum) prennent
-//!   une future qui termine sur `recv()`. Quand main envoie `()`, les deux
-//!   serveurs arrêtent d'accepter de nouvelles connexions et attendent la fin
-//!   des requêtes en cours.
-//! - Le gauge updater écoute la même broadcast via `tokio::select!` entre
-//!   `shutdown.recv()` et `sleep(interval)`.
-//! - `ServiceHandles::drain` attend la fin des trois tâches avec un timeout
-//!   global configurable.
+//! Shutdown architecture:
+//! - A single `broadcast::Sender<()>` owned by `main` is cloned for every
+//!   task via `.subscribe()`. One signal, multiple listeners, no wheel
+//!   reinvention.
+//! - `serve_with_shutdown` (tonic) and `with_graceful_shutdown` (axum) both
+//!   take a future that completes on `recv()`. When main sends `()`, both
+//!   servers stop accepting new connections and wait for in-flight requests
+//!   to finish.
+//! - The gauge updater listens to the same broadcast via `tokio::select!`
+//!   between `shutdown.recv()` and `sleep(interval)`.
+//! - `ServiceHandles::drain` waits for the three tasks to finish with a
+//!   configurable global timeout.
 //!
-//! La factorisation `start_service_with_vdb` permet d'injecter un mock en
-//! test ; `start_service` est la variante prod qui construit `QdrantVdbClient`
-//! à partir de la config.
+//! The `start_service_with_vdb` factoring lets tests inject a mock;
+//! `start_service` is the prod variant that builds `QdrantVdbClient` from
+//! config.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,9 +41,9 @@ pub struct ServiceHandles {
 }
 
 impl ServiceHandles {
-    /// Attend la fin des trois tâches, borné par `timeout`. Retourne
-    /// `Error::Service` si le timeout est atteint (signal que certaines
-    /// tâches ne se terminent pas — à logger et escalader côté orchestrateur).
+    /// Waits for the three tasks to finish, bounded by `timeout`. Returns
+    /// `Error::Service` on timeout (signals that some tasks are not
+    /// terminating — to be logged and escalated by the orchestrator).
     pub async fn drain(self, timeout: Duration) -> Result<(), Error> {
         let joined = tokio::time::timeout(timeout, async move {
             let _ = self.grpc.await;
@@ -60,8 +60,8 @@ impl ServiceHandles {
     }
 }
 
-/// Démarre tout le service avec un `QdrantVdbClient` construit depuis la config.
-/// Variante utilisée par `main.rs`.
+/// Starts the full service with a `QdrantVdbClient` built from config.
+/// Variant used by `main.rs`.
 pub async fn start_service(
     config: &Config,
     metrics_handle: PrometheusHandle,
@@ -71,8 +71,8 @@ pub async fn start_service(
     start_service_with_vdb(config, metrics_handle, vdb, shutdown_tx).await
 }
 
-/// Variante qui accepte un VDB déjà construit. Utilisée par les tests pour
-/// injecter un mock, et réutilisée en interne par `start_service`.
+/// Variant that accepts an already-built VDB. Used by tests to inject a
+/// mock, and reused internally by `start_service`.
 pub async fn start_service_with_vdb(
     config: &Config,
     metrics_handle: PrometheusHandle,
@@ -81,8 +81,8 @@ pub async fn start_service_with_vdb(
 ) -> Result<ServiceHandles, Error> {
     let registry = Arc::new(Registry::new(config.models.clone()));
 
-    // Sizing du pool depuis la config. Calcul : buffers_per_worker × nb_workers,
-    // taille par buffer = dim max connue × 4 octets.
+    // Pool sizing from config. Formula: buffers_per_worker × n_workers,
+    // size per buffer = max known dim × 4 bytes.
     let worker_count = config.pool.worker_threads.unwrap_or_else(|| {
         std::thread::available_parallelism()
             .map(|n| n.get())
@@ -101,7 +101,7 @@ pub async fn start_service_with_vdb(
     let grpc_server = build_grpc_server(grpc_service, &config.server);
     let http_router = build_http_router(Arc::clone(&vdb), metrics_handle);
 
-    // --- Tâche gauge updater ---
+    // --- Gauge updater task ---
     let gauge_shutdown = shutdown_tx.subscribe();
     let gauge = tokio::spawn(gauge_loop(
         Arc::clone(&registry),
@@ -110,7 +110,7 @@ pub async fn start_service_with_vdb(
         gauge_shutdown,
     ));
 
-    // --- Tâche gRPC ---
+    // --- gRPC task ---
     let grpc_shutdown = shutdown_tx.subscribe();
     let grpc_addr = config.server.grpc_bind;
     let grpc = tokio::spawn(async move {
@@ -119,7 +119,7 @@ pub async fn start_service_with_vdb(
             .await
     });
 
-    // --- Tâche HTTP ---
+    // --- HTTP task ---
     let http_shutdown = shutdown_tx.subscribe();
     let http_addr = config.server.http_bind;
     let http = tokio::spawn(async move {
@@ -181,8 +181,8 @@ mod tests {
         );
         Config {
             server: ServerConfig {
-                // Port 0 : le système assigne un port libre, on n'a pas besoin
-                // de le connaître ici (pas de client dans ce test).
+                // Port 0: the system picks a free port; we don't need to
+                // know it here (no client in this test).
                 grpc_bind: "127.0.0.1:0".parse().unwrap(),
                 http_bind: "127.0.0.1:0".parse().unwrap(),
                 max_concurrent_requests: 64,
@@ -225,7 +225,7 @@ mod tests {
             .await
             .expect("start_service");
 
-        // Laisser les serveurs bind avant de signaler shutdown.
+        // Let the servers bind before signaling shutdown.
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         shutdown_tx.send(()).expect("broadcast send");
@@ -238,9 +238,9 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_propagates_to_all_tasks_in_order() {
-        // On vérifie qu'un drain s'achève bien dans les temps même si le
-        // gauge updater dort (intervalle 5s). Le tokio::select! doit sortir
-        // de la boucle sur shutdown, pas attendre le tick suivant.
+        // Verify that a drain completes within the window even when the
+        // gauge updater is sleeping (5s interval). The tokio::select! must
+        // break out of the loop on shutdown, not wait for the next tick.
         let config = test_config();
         let vdb: Arc<dyn VectorDbClient> = Arc::new(MockVdbClient::new());
         let metrics = test_metrics_handle();
@@ -257,8 +257,8 @@ mod tests {
         handles.drain(Duration::from_secs(5)).await.expect("drain");
         let elapsed = start.elapsed();
 
-        // Le drain doit être immédiat (< 1s), pas bloqué sur le tick du
-        // gauge updater (5s). Si > 1s, c'est que le select! n'interrompt pas.
+        // Drain must be immediate (< 1s), not blocked on the gauge
+        // updater's tick (5s). If > 1s, the select! is not interrupting.
         assert!(
             elapsed < Duration::from_secs(1),
             "drain aurait dû être immédiat, eu {elapsed:?}"
@@ -267,10 +267,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn drain_timeout_is_reported() {
-        // Test de sécurité : si drain dépasse son timeout, on retourne une
-        // erreur explicite. On garde shutdown_tx alive (clone) pour empêcher
-        // les subscribers de recevoir `Closed` — les tâches attendent donc
-        // un vrai signal qu'on ne va pas envoyer, ce qui force le timeout.
+        // Safety test: if drain exceeds its timeout, we return an explicit
+        // error. We keep shutdown_tx alive (clone) so subscribers don't
+        // receive `Closed` — tasks then wait for a real signal we won't
+        // send, which forces the timeout.
         let config = test_config();
         let vdb: Arc<dyn VectorDbClient> = Arc::new(MockVdbClient::new());
         let metrics = test_metrics_handle();
@@ -281,15 +281,15 @@ mod tests {
             .expect("start_service");
 
         tokio::time::sleep(Duration::from_millis(50)).await;
-        // Ne PAS envoyer shutdown (shutdown_tx reste alive) → drain doit timeout.
+        // Do NOT send shutdown (shutdown_tx stays alive) → drain must time out.
         let err = handles
             .drain(Duration::from_millis(200))
             .await
             .expect_err("drain sans signal doit timeout");
         assert!(matches!(err, Error::Service(_)));
 
-        // Cleanup : on envoie shutdown maintenant pour libérer les tâches
-        // background et permettre au runtime tokio de terminer proprement.
+        // Cleanup: send shutdown now so background tasks can release and
+        // the tokio runtime can shut down cleanly.
         let _ = shutdown_tx.send(());
     }
 }

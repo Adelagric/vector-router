@@ -1,14 +1,14 @@
-//! Serveur HTTP secondaire pour l'observabilité SRE.
+//! Secondary HTTP server for SRE observability.
 //!
-//! Endpoints :
-//! - `GET /health` : liveness. Retourne 200 OK dès que le service répond.
-//! - `GET /ready`  : readiness. Retourne 200 si le VDB est joignable via
-//!   `VectorDbClient::health()`, 503 sinon. Utilisé par Kubernetes /
-//!   load balancer pour router le trafic.
-//! - `GET /metrics` : format Prometheus, rendu par le handle global.
-//! - `GET /dashboard` : page HTML statique (embarquée via `include_str!`)
-//!   qui agrège métriques temps réel + preuves techniques (tests, benches)
-//!   pour les démonstrations locales. Ne remplace PAS Grafana en production.
+//! Endpoints:
+//! - `GET /health`: liveness. Returns 200 OK as soon as the service responds.
+//! - `GET /ready`: readiness. Returns 200 if the VDB is reachable via
+//!   `VectorDbClient::health()`, 503 otherwise. Used by Kubernetes /
+//!   load balancer to route traffic.
+//! - `GET /metrics`: Prometheus format, rendered by the global handle.
+//! - `GET /dashboard`: static HTML page (embedded via `include_str!`)
+//!   that aggregates real-time metrics + technical evidence (tests,
+//!   benches) for local demos. Does NOT replace Grafana in production.
 
 use std::sync::Arc;
 
@@ -21,9 +21,9 @@ use metrics_exporter_prometheus::PrometheusHandle;
 
 use crate::client::VectorDbClient;
 
-/// HTML statique embarqué au build via `include_str!`. Évite toute
-/// dépendance runtime sur un fichier externe, et garde l'image Docker
-/// auto-suffisante.
+/// Static HTML embedded at build time via `include_str!`. Avoids any
+/// runtime dependency on an external file and keeps the Docker image
+/// self-contained.
 const DASHBOARD_HTML: &str = include_str!("../../static/dashboard.html");
 
 #[derive(Clone)]
@@ -32,7 +32,7 @@ struct AppState {
     metrics: PrometheusHandle,
 }
 
-/// Construit le router HTTP de supervision.
+/// Builds the supervision HTTP router.
 pub fn build_http_router(vdb: Arc<dyn VectorDbClient>, metrics: PrometheusHandle) -> Router {
     let state = AppState { vdb, metrics };
     Router::new()
@@ -79,9 +79,9 @@ mod tests {
     use metrics_exporter_prometheus::PrometheusBuilder;
     use tower::ServiceExt;
 
-    /// Retourne un handle Prometheus isolé pour les tests. Utilise
-    /// `build_recorder` (pas `install_recorder`) pour éviter le conflit
-    /// d'installation globale entre tests.
+    /// Returns an isolated Prometheus handle for tests. Uses
+    /// `build_recorder` (not `install_recorder`) to avoid global
+    /// installation conflicts across tests.
     fn test_metrics_handle() -> PrometheusHandle {
         PrometheusBuilder::new().build_recorder().handle()
     }
@@ -169,7 +169,7 @@ mod tests {
             .unwrap();
         let body = std::str::from_utf8(&body_bytes).unwrap();
 
-        // Vérifie la structure de la page : les trois sections sont bien présentes.
+        // Verify the page structure: the three sections are all present.
         assert!(body.contains("Vector Router"), "titre manquant");
         assert!(body.contains("État du service"), "section live manquante");
         assert!(
@@ -180,7 +180,7 @@ mod tests {
             body.contains("Performance mesurée"),
             "section bench manquante"
         );
-        // Le JS doit pointer vers /metrics pour le live refresh.
+        // The JS must point to /metrics for live refresh.
         assert!(
             body.contains("fetch(\"/metrics\""),
             "fetch metrics manquant"

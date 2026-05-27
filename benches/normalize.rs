@@ -1,10 +1,10 @@
-//! Benches de `l2_norm_squared` et `normalize_in_place`.
+//! Benches for `l2_norm_squared` and `normalize_in_place`.
 //!
-//! Règles respectées :
-//! - `black_box` sur tous les inputs ET outputs.
-//! - assertion de sanité vérifiant que le résultat dépend bien de l'input
-//!   (évite de constater tardivement qu'un `black_box` manquant a laissé
-//!   le compilateur constant-folder).
+//! Rules followed:
+//! - `black_box` on all inputs AND outputs.
+//! - Sanity assertion that the result actually depends on the input
+//!   (avoids belatedly noticing that a missing `black_box` let the
+//!   compiler constant-fold).
 
 use std::hint::black_box;
 
@@ -26,7 +26,7 @@ fn gen_vector(seed: u32) -> Vec<f32> {
 }
 
 fn bench_l2_norm_squared(c: &mut Criterion) {
-    // Sanité globale : deux vecteurs différents → normes² différentes.
+    // Global sanity: two different vectors → different squared norms.
     let v1 = gen_vector(1);
     let v2 = gen_vector(2);
     let n1 = l2_norm_squared(&v1).expect("vecteur valide");
@@ -52,13 +52,13 @@ fn bench_l2_norm_squared(c: &mut Criterion) {
 }
 
 fn bench_normalize_in_place(c: &mut Criterion) {
-    // On prépare un vecteur non normalisé ; sa copie est faite à chaque
-    // itération via `iter_batched` pour ne pas mesurer une dérive
-    // cumulative de la valeur.
+    // We prepare a non-normalized vector; its copy is made on every
+    // iteration via `iter_batched` to avoid measuring a cumulative drift
+    // of the value.
     let template = gen_vector(3);
     let n2 = l2_norm_squared(&template).expect("valide");
 
-    // Sanité : la fonction doit bien modifier le vecteur.
+    // Sanity: the function must actually mutate the vector.
     let mut probe = template.clone();
     let changed = normalize_in_place(&mut probe, n2);
     assert!(

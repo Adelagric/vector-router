@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 
-/// Configuration complète du middleware.
+/// Full middleware configuration.
 ///
-/// Le champ `models` peut être vide au démarrage : le service répondra
-/// alors `UnknownModel` à chaque requête, ce qui est le comportement
-/// voulu (un modèle non déclaré est rejeté).
+/// The `models` field may be empty at startup: the service will then reply
+/// `UnknownModel` to every request, which is the intended behavior (an
+/// undeclared model is rejected).
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     pub server: ServerConfig,
@@ -30,56 +30,56 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ServerConfig {
-    /// Adresse d'écoute gRPC.
+    /// gRPC listen address.
     pub grpc_bind: SocketAddr,
-    /// Adresse d'écoute HTTP (admin, health, metrics).
+    /// HTTP listen address (admin, health, metrics).
     pub http_bind: SocketAddr,
-    /// Limite de requêtes simultanées (rate limit global).
+    /// Concurrent request limit (global rate limit).
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent_requests: u32,
-    /// Limite de taille d'un message gRPC entrant, en octets.
+    /// Maximum incoming gRPC message size, in bytes.
     #[serde(default = "default_max_message_size")]
     pub max_decoding_message_size_bytes: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AdminConfig {
-    /// Token d'authentification bearer pour les endpoints /admin/*.
-    /// Comparé en temps constant à la réception.
+    /// Bearer authentication token for the /admin/* endpoints.
+    /// Compared in constant time on receipt.
     pub bearer_token: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct VdbConfig {
-    /// URL du cluster Qdrant (ex: http://qdrant:6334).
+    /// Qdrant cluster URL (e.g. http://qdrant:6334).
     pub url: String,
-    /// Clé API optionnelle.
+    /// Optional API key.
     #[serde(default)]
     pub api_key: Option<String>,
-    /// Timeout par appel, en millisecondes.
+    /// Per-call timeout, in milliseconds.
     #[serde(default = "default_vdb_timeout_ms")]
     pub timeout_ms: u64,
-    /// Nombre maximum de tentatives (1 = pas de retry).
+    /// Maximum number of attempts (1 = no retry).
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
-    /// Délai initial du backoff exponentiel, en millisecondes.
+    /// Initial exponential backoff delay, in milliseconds.
     #[serde(default = "default_retry_base_delay_ms")]
     pub retry_base_delay_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PoolConfig {
-    /// Facteur multiplicatif : `N_buffers = buffers_per_worker × worker_threads`.
+    /// Multiplier: `N_buffers = buffers_per_worker × worker_threads`.
     pub buffers_per_worker: u32,
-    /// Override du nombre de workers tokio. `None` = détection auto.
+    /// Override of the tokio worker count. `None` = auto-detect.
     pub worker_threads: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TelemetryConfig {
-    /// Niveau de log pour tracing (`error`, `warn`, `info`, `debug`, `trace`).
+    /// Tracing log level (`error`, `warn`, `info`, `debug`, `trace`).
     pub log_level: String,
-    /// Endpoint OTLP pour l'export des traces. `None` = export désactivé.
+    /// OTLP endpoint for trace export. `None` = export disabled.
     pub otlp_endpoint: Option<String>,
 }
 
@@ -90,7 +90,7 @@ pub struct ModelSpec {
     pub vdb_namespace: String,
 }
 
-// --- Defaults pour les champs optionnels ------------------------------------
+// --- Defaults for optional fields -------------------------------------------
 
 impl Default for PoolConfig {
     fn default() -> Self {
@@ -115,8 +115,8 @@ fn default_max_concurrent() -> u32 {
 }
 
 fn default_max_message_size() -> usize {
-    // 16 Mo : couvre largement tout vecteur raisonnable (jusqu'à 4M dims)
-    // sans laisser passer un abus de taille.
+    // 16 MB: covers any reasonable vector (up to 4M dims) without letting
+    // through a size-based abuse.
     16 * 1024 * 1024
 }
 
@@ -132,11 +132,11 @@ fn default_retry_base_delay_ms() -> u64 {
     50
 }
 
-// --- Chargement et validation -----------------------------------------------
+// --- Loading and validation -------------------------------------------------
 
 impl Config {
-    /// Charge depuis un fichier TOML, override par variables d'env préfixées `VR_`.
-    /// Exemple : `VR_SERVER__GRPC_BIND="0.0.0.0:50051"`.
+    /// Load from a TOML file, overridden by env vars prefixed `VR_`.
+    /// Example: `VR_SERVER__GRPC_BIND="0.0.0.0:50051"`.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         Self::from_figment(
             Figment::new()
@@ -145,14 +145,14 @@ impl Config {
         )
     }
 
-    /// Variante utilisée par les tests et les chargements en mémoire.
+    /// Variant used by tests and in-memory loads.
     pub fn from_figment(fig: Figment) -> Result<Self, Error> {
         let cfg: Config = fig.extract()?;
         cfg.validate()?;
         Ok(cfg)
     }
 
-    /// Contrôles post-parsing : dimensions, tokens, URLs non vides.
+    /// Post-parsing checks: dimensions, tokens, non-empty URLs.
     fn validate(&self) -> Result<(), Error> {
         if self.admin.bearer_token.is_empty() {
             return Err(Error::Validation("admin.bearer_token vide".into()));
@@ -219,7 +219,7 @@ buffers_per_worker = 2
         assert_eq!(cfg.admin.bearer_token, "secret");
         assert_eq!(cfg.vdb.url, "http://qdrant:6334");
         assert!(cfg.models.is_empty());
-        // Les defaults doivent s'appliquer.
+        // Defaults must apply.
         assert_eq!(cfg.vdb.max_retries, 3);
         assert_eq!(cfg.telemetry.log_level, "info");
     }
@@ -252,7 +252,7 @@ vdb_namespace = "prod-cohere-en"
 
     #[test]
     fn rejects_missing_required_field() {
-        // Pas de section [admin] = bearer_token manquant au parsing.
+        // No [admin] section = bearer_token missing at parse time.
         let toml = r#"
 [server]
 grpc_bind = "0.0.0.0:50051"
@@ -331,16 +331,16 @@ vdb_namespace = ""
 # rien, on surcharge via env-like
 "#
         );
-        // On ne peut pas facilement surcharger via Toml::string — on fait une map manuelle.
-        let _ = toml; // silencer warning
+        // We can't easily override via Toml::string — build a manual map instead.
+        let _ = toml; // silence warning
         let full =
             VALID_MINIMAL.to_string() + "\n[vdb]\nurl = \"http://qdrant:6334\"\nmax_retries = 0\n";
-        // Cette construction crée deux [vdb], figment prend le dernier gagnant :
+        // This construction creates two [vdb] sections; figment takes the last one as winner:
         let err = load_str(&full).expect_err("max_retries = 0");
-        // Soit Config (doublon de section) soit Validation selon comment figment fusionne.
+        // Either Config (duplicate section) or Validation depending on how figment merges.
         match err {
             Error::Validation(msg) => assert!(msg.contains("max_retries")),
-            Error::Config(_) => {} // acceptable : parsing a échoué sur la section dupliquée
+            Error::Config(_) => {} // acceptable: parsing failed on the duplicate section
             other => panic!("erreur inattendue : {other:?}"),
         }
     }

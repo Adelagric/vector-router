@@ -1,19 +1,19 @@
-//! Tests d'intégration bout-en-bout à travers le vrai transport tonic.
+//! End-to-end integration tests through the real tonic transport.
 //!
-//! Couverture :
-//! - `graceful_shutdown_preserves_in_flight_request` : prouve que
-//!   `serve_with_shutdown` de tonic 0.14.5 draine bien les requêtes en vol.
-//! - `concurrency_limit_enforces_max_inflight` : prouve que la
-//!   `ConcurrencyLimitLayer` est câblée et régule effectivement la charge.
-//! - `oversized_payload_rejected_before_handler` : prouve la sécurité contre
-//!   le DoS volumétrique via `max_decoding_message_size`.
-//! - `multi_model_concurrent_upserts` : vérifie la cohérence du pipeline
-//!   sous charge concurrente sur plusieurs modèles.
+//! Coverage:
+//! - `graceful_shutdown_preserves_in_flight_request`: proves that tonic
+//!   0.14.5's `serve_with_shutdown` drains in-flight requests.
+//! - `concurrency_limit_enforces_max_inflight`: proves that the
+//!   `ConcurrencyLimitLayer` is wired in and effectively regulates load.
+//! - `oversized_payload_rejected_before_handler`: proves volumetric DoS
+//!   protection via `max_decoding_message_size`.
+//! - `multi_model_concurrent_upserts`: checks pipeline consistency under
+//!   concurrent load across several models.
 //!
-//! Synchronisation : les tests qui doivent figer le handler en un point
-//! précis utilisent `tokio::sync::Notify` via `SyncMock` (pas de sleep, pas
-//! de timing fragile). Le seul sleep est une attente sémantiquement
-//! justifiée de la propagation du shutdown réseau.
+//! Synchronization: tests that need to freeze the handler at a precise
+//! point use `tokio::sync::Notify` via `SyncMock` (no sleep, no fragile
+//! timing). The only sleep is a semantically justified wait for network
+//! shutdown propagation.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -39,13 +39,13 @@ use vector_router::proto::vector_router::v1::{
 use vector_router::registry::Registry;
 use vector_router::server::grpc::VectorRouterService;
 
-// --- Mock avec synchronisation par Notify -----------------------------------
+// --- Mock with Notify-based synchronization ---------------------------------
 
 #[derive(Default)]
 struct SyncHooks {
-    /// Signalé par le mock dès que upsert() est appelé.
+    /// Signaled by the mock as soon as upsert() is called.
     entered: Notify,
-    /// Attendu par le mock avant de retourner.
+    /// Awaited by the mock before returning.
     release: Notify,
 }
 
@@ -74,7 +74,7 @@ impl SyncMock {
 #[async_trait]
 impl VectorDbClient for SyncMock {
     async fn upsert(&self, params: UpsertParams) -> Result<(), VrError> {
-        // Capture l'éventuel hook SANS garder le lock à travers l'await.
+        // Capture the optional hook WITHOUT holding the lock across await.
         let hooks = self.upsert_sync.lock().expect("mutex").clone();
         if let Some(h) = hooks {
             h.entered.notify_one();
@@ -93,7 +93,7 @@ impl VectorDbClient for SyncMock {
     }
 }
 
-// --- Helpers de setup serveur tonic -----------------------------------------
+// --- tonic server setup helpers ---------------------------------------------
 
 struct RunningServer {
     addr: std::net::SocketAddr,
@@ -140,8 +140,8 @@ fn vdb_cfg() -> VdbConfig {
     }
 }
 
-/// Démarre un serveur tonic sur un port dynamique, avec couches tower
-/// appliquées. Retourne l'adresse bindée et un émetteur de shutdown.
+/// Starts a tonic server on a dynamic port, with the tower layers applied.
+/// Returns the bound address and a shutdown sender.
 async fn start_server(
     vdb: Arc<dyn VectorDbClient>,
     max_concurrent: usize,
@@ -180,8 +180,8 @@ async fn start_server(
 }
 
 async fn make_client(addr: std::net::SocketAddr) -> VectorRouterClient<tonic::transport::Channel> {
-    // Petite boucle de retry au cas où le serveur n'est pas encore prêt
-    // à accepter des connexions (course connue entre bind et serve).
+    // Small retry loop in case the server isn't ready to accept
+    // connections yet (known race between bind and serve).
     for _ in 0..10 {
         if let Ok(ch) = tonic::transport::Channel::from_shared(format!("http://{addr}"))
             .expect("endpoint")
@@ -207,7 +207,7 @@ fn upsert_req(model_id: &str, point_id: &str) -> UpsertRequest {
     }
 }
 
-// --- Test 1 : graceful shutdown --------------------------------------------
+// --- Test 1: graceful shutdown ---------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn graceful_shutdown_preserves_in_flight_request() {
@@ -218,23 +218,23 @@ async fn graceful_shutdown_preserves_in_flight_request() {
     let server = start_server(mock.clone(), 16, 1 << 20).await;
     let mut client = make_client(server.addr).await;
 
-    // 1. Lancer la requête en background : elle va se bloquer dans le mock.
+    // 1. Launch the request in the background: it will block in the mock.
     let req_task = tokio::spawn(async move { client.upsert(upsert_req("m1", "p1")).await });
 
-    // 2. Attendre que le handler entre réellement dans le mock (sync explicite).
+    // 2. Wait for the handler to actually enter the mock (explicit sync).
     hooks.entered.notified().await;
 
-    // 3. Déclencher le shutdown côté serveur.
+    // 3. Trigger shutdown on the server side.
     server.shutdown_tx.send(()).expect("broadcast");
 
-    // 4. Laisser 50ms pour que tonic ferme l'accept des nouvelles connexions.
-    //    Le stream existant doit être drainé, pas coupé.
+    // 4. Give 50ms for tonic to stop accepting new connections.
+    //    The existing stream must be drained, not cut.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // 5. Libérer le handler pour qu'il termine son travail.
+    // 5. Release the handler so it finishes its work.
     hooks.release.notify_one();
 
-    // 6. La requête en vol DOIT aboutir malgré le shutdown en cours.
+    // 6. The in-flight request MUST succeed despite the in-progress shutdown.
     let resp = req_task
         .await
         .expect("join")
@@ -243,12 +243,12 @@ async fn graceful_shutdown_preserves_in_flight_request() {
     assert_eq!(mock.upsert_count(), 1);
 }
 
-// --- Test 2 : concurrency limit via ConcurrencyLimitLayer ------------------
+// --- Test 2: concurrency limit via ConcurrencyLimitLayer -------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrency_limit_enforces_max_inflight() {
-    // max_concurrent = 2 : au plus 2 requêtes doivent être "dans" le handler
-    // à un instant donné. La 3e doit attendre.
+    // max_concurrent = 2: at most 2 requests can be "in" the handler at
+    // any given time. The 3rd must wait.
     let mock = Arc::new(SyncMock::new());
     let hooks = Arc::new(SyncHooks::default());
     mock.install_upsert_sync(hooks.clone());
@@ -259,30 +259,30 @@ async fn concurrency_limit_enforces_max_inflight() {
     let mut client2 = client1.clone();
     let mut client3 = client1.clone();
 
-    // Lance trois requêtes concurrentes — toutes vont se bloquer dans le mock.
+    // Launch three concurrent requests — all will block in the mock.
     let h1 = tokio::spawn(async move { client1.upsert(upsert_req("m1", "p1")).await });
     let h2 = tokio::spawn(async move { client2.upsert(upsert_req("m1", "p2")).await });
     let h3 = tokio::spawn(async move { client3.upsert(upsert_req("m1", "p3")).await });
 
-    // Attendre 2 entrées ; la 3e ne doit PAS être entrée (bloquée par Tower).
+    // Wait for 2 entries; the 3rd must NOT have entered (Tower-blocked).
     hooks.entered.notified().await;
     hooks.entered.notified().await;
 
-    // Laisser un peu pour s'assurer que la 3e aurait eu le temps d'entrer
-    // si elle n'était pas limitée. 100ms est largement au-delà du trafic
-    // localhost. Si elle entre malgré tout, le compteur passera à 3 avant
-    // qu'on relâche les deux premières, et le test le détectera indirectement.
+    // Wait a bit to make sure the 3rd would have had time to enter if it
+    // weren't limited. 100ms is well beyond localhost traffic. If it
+    // enters anyway, the counter will hit 3 before we release the first
+    // two, and the test will detect it indirectly.
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // Relâcher les deux premières.
+    // Release the first two.
     hooks.release.notify_one();
     hooks.release.notify_one();
 
-    // Maintenant la 3e peut entrer et être relâchée.
+    // Now the 3rd can enter and be released.
     hooks.entered.notified().await;
     hooks.release.notify_one();
 
-    // Les trois doivent finir avec succès.
+    // All three must finish successfully.
     for h in [h1, h2, h3] {
         h.await.expect("join").expect("upsert");
     }
@@ -291,17 +291,17 @@ async fn concurrency_limit_enforces_max_inflight() {
     let _ = server.shutdown_tx.send(());
 }
 
-// --- Test 3 : rejet de payload surdimensionné ------------------------------
+// --- Test 3: oversized payload rejection -----------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn oversized_payload_rejected_before_handler() {
-    // max_decoding = 128 octets : un vecteur de 1536 dims (6144 octets) doit
-    // être rejeté AVANT d'atteindre le handler.
+    // max_decoding = 128 bytes: a 1536-dim vector (6144 bytes) must be
+    // rejected BEFORE reaching the handler.
     let mock = Arc::new(SyncMock::new());
     let server = start_server(mock.clone(), 8, 128).await;
     let mut client = make_client(server.addr).await;
 
-    // Payload volontairement gros
+    // Deliberately large payload
     let big_floats = vec![0.0f32; 1536];
     let req = UpsertRequest {
         model_id: "m1".to_string(),
@@ -316,9 +316,9 @@ async fn oversized_payload_rejected_before_handler() {
         .upsert(req)
         .await
         .expect_err("payload trop gros doit être rejeté");
-    // Le code exact varie selon le mapping tonic (ResourceExhausted,
-    // OutOfRange, ou Unknown côté transport). On vérifie juste que c'est
-    // une erreur ET que le handler n'a PAS été appelé.
+    // The exact code varies with the tonic mapping (ResourceExhausted,
+    // OutOfRange, or Unknown on the transport side). Just verify that
+    // it's an error AND that the handler was NOT invoked.
     assert!(
         matches!(
             err.code(),
@@ -340,13 +340,13 @@ async fn oversized_payload_rejected_before_handler() {
     let _ = server.shutdown_tx.send(());
 }
 
-// --- Test 4 : charge concurrente multi-modèles -----------------------------
+// --- Test 4: concurrent multi-model load ----------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multi_model_concurrent_upserts() {
-    // 3 modèles × 30 requêtes chacun = 90 upserts en parallèle, sans sync
-    // hook (le mock répond immédiatement). Vérifie l'absence de race et la
-    // cohérence du compteur.
+    // 3 models × 30 requests each = 90 parallel upserts, without sync
+    // hooks (the mock responds immediately). Checks for the absence of
+    // races and counter consistency.
     let mock = Arc::new(SyncMock::new());
     let server = start_server(mock.clone(), 64, 1 << 20).await;
 
@@ -372,7 +372,7 @@ async fn multi_model_concurrent_upserts() {
         "les 90 upserts doivent être arrivés"
     );
 
-    // Vérifier la répartition par namespace.
+    // Check the per-namespace distribution.
     let calls = mock.upserts.lock().expect("mutex");
     let ns1 = calls.iter().filter(|u| u.namespace == "ns-m1").count();
     let ns2 = calls.iter().filter(|u| u.namespace == "ns-m2").count();

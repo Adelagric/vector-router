@@ -1,14 +1,13 @@
 use thiserror::Error;
 
-/// Erreurs remontées par le crate.
+/// Errors raised by this crate.
 ///
-/// Les variantes de traitement (UnknownModel, InvalidDim, InvalidNumeric, Vdb)
-/// correspondent à un label `status` de la métrique `requests_total`.
-/// Les variantes de démarrage (Config, Io, Validation) ne touchent pas
-/// le chemin chaud.
+/// The processing variants (UnknownModel, InvalidDim, InvalidNumeric, Vdb)
+/// correspond to a `status` label on the `requests_total` metric.
+/// The startup variants (Config, Io, Validation) never touch the hot path.
 ///
-/// Note : `figment::Error` est boxé car il pèse ~200 octets et ferait grossir
-/// tout `Result<_, Error>` sur le chemin chaud (clippy::result_large_err).
+/// Note: `figment::Error` is boxed because it weighs ~200 bytes and would
+/// bloat every `Result<_, Error>` on the hot path (clippy::result_large_err).
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("modèle inconnu : {model_id}")]

@@ -1,12 +1,12 @@
-//! Initialisation des métriques Prometheus et mise à jour périodique des
-//! gauges dont la valeur est lue en pull depuis l'application (taille du
-//! registre, inflight VDB, etc.).
+//! Prometheus metrics initialization and periodic update of gauges whose
+//! values are pulled from the application (registry size, VDB inflight,
+//! etc.).
 //!
-//! L'installation du recorder est globale et ne peut être faite qu'une fois
-//! par process. `main.rs` (étape 9) appellera `init_metrics()` avant de
-//! démarrer les serveurs. Les appels de `metrics::counter!()` /
-//! `metrics::histogram!()` / `metrics::gauge!()` ailleurs dans le code sont
-//! silencieusement ignorés si le recorder n'a pas été installé (tests).
+//! Recorder installation is global and can only happen once per process.
+//! `main.rs` (step 9) calls `init_metrics()` before starting the servers.
+//! Calls to `metrics::counter!()` / `metrics::histogram!()` /
+//! `metrics::gauge!()` elsewhere in the code are silently ignored if no
+//! recorder has been installed (tests).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,20 +19,20 @@ use crate::error::Error;
 use crate::pool::BufferPool;
 use crate::registry::Registry;
 
-/// Installe le recorder Prometheus global. Retourne le handle utilisé par
-/// l'endpoint `/metrics` pour rendre la sortie Prometheus à la volée.
+/// Installs the global Prometheus recorder. Returns the handle used by the
+/// `/metrics` endpoint to render the Prometheus output on demand.
 ///
-/// À n'appeler qu'une seule fois par process.
+/// Must be called only once per process.
 pub fn init_metrics() -> Result<PrometheusHandle, Error> {
     PrometheusBuilder::new()
         .install_recorder()
         .map_err(|e| Error::Telemetry(format!("install recorder : {e}")))
 }
 
-/// Tâche background qui met à jour les gauges de pull (valeurs qu'on lit
-/// périodiquement depuis l'état applicatif plutôt que d'émettre à chaque
-/// événement). Intervalle raisonnable : 5s — suffisant pour un dashboard
-/// Grafana sans générer de surcharge.
+/// Background task that updates pull gauges (values we read periodically
+/// from the application state rather than emit on every event). Reasonable
+/// interval: 5s — enough for a Grafana dashboard without generating
+/// overhead.
 pub async fn run_gauge_updater(
     registry: Arc<Registry>,
     pool: Arc<BufferPool>,
@@ -53,12 +53,12 @@ mod tests {
 
     #[test]
     fn init_metrics_installs_recorder_once() {
-        // Un seul test peut appeler init_metrics() : les autres tests le
-        // verront déjà installé. On utilise un nom qui rend ce test facile
-        // à filtrer si la suite grandit (e.g. `cargo test -- --skip install`).
+        // Only one test can call init_metrics(); the others will see it
+        // already installed. We use a name that makes this test easy to
+        // filter if the suite grows (e.g. `cargo test -- --skip install`).
         let result = init_metrics();
-        // Le test peut être exécuté avec d'autres tests qui ont déjà installé
-        // un recorder (par exemple dans http::tests). On tolère les deux cas.
+        // The test may run alongside other tests that already installed a
+        // recorder (e.g. in http::tests). We tolerate both cases.
         match result {
             Ok(_) | Err(Error::Telemetry(_)) => {}
             Err(e) => panic!("erreur inattendue : {e:?}"),

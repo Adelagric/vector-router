@@ -1,10 +1,10 @@
-//! Registre des modèles acceptés, stocké en `ArcSwap<HashMap<...>>` pour
-//! garantir des lectures lock-free sur le chemin chaud.
+//! Registry of accepted models, stored as `ArcSwap<HashMap<...>>` to
+//! guarantee lock-free reads on the hot path.
 //!
-//! Les mises à jour (ajout, suppression) utilisent la primitive `rcu` qui
-//! retry en cas de contention — acceptable car les mises à jour sont rares
-//! (quelques par heure au plus via les endpoints admin), contrairement aux
-//! lectures qui se font à chaque requête gRPC.
+//! Updates (add, remove) use the `rcu` primitive which retries on
+//! contention — acceptable because updates are rare (a few per hour at
+//! most via admin endpoints), unlike reads which happen on every gRPC
+//! request.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,21 +25,21 @@ impl Registry {
         }
     }
 
-    /// Retourne un snapshot atomique. Pour une requête gRPC, n'appeler `load()`
-    /// qu'une seule fois et conserver le résultat dans une variable locale,
-    /// sinon deux lookups peuvent tomber de part et d'autre d'une mise à jour
-    /// et voir des versions incohérentes.
+    /// Returns an atomic snapshot. For a gRPC request, only call `load()`
+    /// once and keep the result in a local variable; otherwise two lookups
+    /// can fall on either side of an update and see inconsistent versions.
     pub fn snapshot(&self) -> Arc<HashMap<String, ModelSpec>> {
         self.inner.load_full()
     }
 
-    /// Lookup O(1) sur le snapshot courant. Renvoie une copie du `ModelSpec`
-    /// pour éviter d'allonger la durée de vie du snapshot à travers l'API.
+    /// O(1) lookup on the current snapshot. Returns a copy of the
+    /// `ModelSpec` to avoid extending the snapshot's lifetime through the
+    /// API.
     pub fn get(&self, id: &str) -> Option<ModelSpec> {
         self.inner.load().get(id).cloned()
     }
 
-    /// Ajoute ou remplace un modèle. Retry implicite sur contention via rcu.
+    /// Adds or replaces a model. Implicit retry on contention via rcu.
     pub fn upsert(&self, id: String, spec: ModelSpec) {
         self.inner.rcu(|cur| {
             let mut new: HashMap<String, ModelSpec> = (**cur).clone();
@@ -48,7 +48,7 @@ impl Registry {
         });
     }
 
-    /// Supprime un modèle. Retourne `true` si le modèle existait.
+    /// Removes a model. Returns `true` if the model existed.
     pub fn remove(&self, id: &str) -> bool {
         let existed = AtomicBool::new(false);
         self.inner.rcu(|cur| {
@@ -60,7 +60,7 @@ impl Registry {
         existed.load(Ordering::Relaxed)
     }
 
-    /// Liste des modèles actuellement enregistrés (copie).
+    /// List of currently registered models (copy).
     pub fn list(&self) -> Vec<(String, ModelSpec)> {
         self.inner
             .load()
@@ -78,7 +78,7 @@ impl Registry {
     }
 }
 
-// --- Tests synchrones -------------------------------------------------------
+// --- Synchronous tests ------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -144,8 +144,8 @@ mod tests {
 
     #[test]
     fn snapshot_is_stable_during_update() {
-        // Scénario : on prend un snapshot, on mute le registre, le snapshot
-        // doit toujours refléter l'état au moment du load().
+        // Scenario: take a snapshot, mutate the registry; the snapshot must
+        // still reflect the state at the moment of load().
         let r = Registry::new(HashMap::new());
         r.upsert("m1".into(), spec(100));
 
@@ -153,19 +153,19 @@ mod tests {
         r.upsert("m1".into(), spec(200));
         r.upsert("m2".into(), spec(300));
 
-        // Le snapshot capturé avant les updates ne voit que m1@100.
+        // The snapshot captured before the updates only sees m1@100.
         assert_eq!(snap.len(), 1);
         assert_eq!(snap.get("m1").unwrap().dim, 100);
 
-        // L'état courant voit les mises à jour.
+        // The current state sees the updates.
         assert_eq!(r.get("m1").unwrap().dim, 200);
         assert_eq!(r.get("m2").unwrap().dim, 300);
     }
 
     #[test]
     fn concurrent_readers_and_writer_consistent() {
-        // Test de charge synchrone : plusieurs lecteurs vs un writer,
-        // synchronisés via Barrier (pas de sleep, conformément aux règles).
+        // Synchronous load test: multiple readers vs one writer, synchronized
+        // via Barrier (no sleep, per project rules).
         use std::sync::Barrier;
         use std::thread;
 
@@ -184,9 +184,9 @@ mod tests {
             handles.push(thread::spawn(move || {
                 b.wait();
                 for _ in 0..N_ITER {
-                    // Le modèle "stable" existe toujours avec dim == 42 ;
-                    // le writer n'y touche jamais. Les lectures doivent
-                    // systématiquement voir cette valeur cohérente.
+                    // The "stable" model always exists with dim == 42; the
+                    // writer never touches it. Reads must consistently see
+                    // this coherent value.
                     let got = r.get("stable").expect("stable toujours présent");
                     assert_eq!(got.dim, 42);
                 }
@@ -212,19 +212,19 @@ mod tests {
         }
         writer.join().expect("writer panic");
 
-        // Le modèle "stable" est toujours là après toute la séquence.
+        // The "stable" model is still there after the full sequence.
         assert_eq!(r.get("stable").unwrap().dim, 42);
     }
 }
 
-// --- Test loom --------------------------------------------------------------
+// --- loom test --------------------------------------------------------------
 //
-// Le test loom vérifie le pattern "snapshot lock-free + update atomique" sur
-// un modèle simplifié qui utilise les primitives instrumentées de loom.
-// `arc-swap` a sa propre couverture loom interne ; ici on valide notre logique
-// (lecture de snapshot + cycle read-modify-write côté écrivain).
+// The loom test validates the "lock-free snapshot + atomic update" pattern on
+// a simplified model that uses loom's instrumented primitives. `arc-swap`
+// has its own internal loom coverage; here we validate our own logic
+// (snapshot read + read-modify-write cycle on the writer side).
 //
-// Exécution :  RUSTFLAGS='--cfg loom' cargo test --release --lib registry_loom
+// Run with:  RUSTFLAGS='--cfg loom' cargo test --release --lib registry_loom
 #[cfg(loom)]
 mod registry_loom {
     use loom::sync::{Arc, Mutex};
@@ -233,9 +233,9 @@ mod registry_loom {
     #[test]
     fn snapshot_is_consistent_across_update() {
         loom::model(|| {
-            // Modèle : Mutex<Arc<Vec<u32>>>.
-            // Lecteur : prend le lock brièvement pour cloner l'Arc, puis lit.
-            // Écrivain : prend le lock, clone l'Arc intérieur, modifie, remplace.
+            // Model: Mutex<Arc<Vec<u32>>>.
+            // Reader: takes the lock briefly to clone the Arc, then reads.
+            // Writer: takes the lock, clones the inner Arc, mutates, swaps.
             let state = Arc::new(Mutex::new(Arc::new(vec![1u32, 2, 3])));
 
             let writer = {
@@ -248,15 +248,15 @@ mod registry_loom {
                 })
             };
 
-            // Snapshot via lock court + clone de l'Arc.
+            // Snapshot via short lock + Arc clone.
             let snap = {
                 let g = state.lock().unwrap();
                 g.clone()
             };
 
-            // Invariant : peu importe l'entrelacement, le snapshot contient
-            // soit l'ancien état (len=3), soit le nouveau (len=4),
-            // jamais un état intermédiaire corrompu.
+            // Invariant: regardless of interleaving, the snapshot contains
+            // either the old state (len=3) or the new one (len=4), never a
+            // corrupt intermediate state.
             assert!(snap.len() == 3 || snap.len() == 4);
             assert_eq!(snap[0], 1);
             assert_eq!(snap[1], 2);

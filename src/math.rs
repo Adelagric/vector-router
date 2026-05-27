@@ -1,33 +1,33 @@
-//! Noyau numérique du pipeline : validation/alignement, norme L2, normalisation.
+//! Numeric core of the pipeline: validation/alignment, L2 norm, normalization.
 //!
-//! Toutes les opérations manipulent des `&[f32]` ou `&mut [f32]`. Aucune
-//! allocation dans le chemin chaud (hors copie de fallback en cas de
-//! désalignement, déjà prévue par le caller via le pool).
+//! All operations work on `&[f32]` or `&mut [f32]`. No allocation on the hot
+//! path (apart from the fallback copy on misalignment, already planned for by
+//! the caller via the pool).
 
 use std::borrow::Cow;
 
 use crate::error::Error;
 use crate::pool::AlignedBuffer;
 
-/// Valide la taille, puis retourne une vue `&[f32]` soit par zero-copy (cas
-/// majoritaire : le `raw` est aligné sur 4 octets), soit après copie dans
-/// `scratch` si `raw` est désaligné.
+/// Validates the size, then returns a `&[f32]` view either zero-copy (the
+/// common case: `raw` is 4-byte aligned) or after copying into `scratch` if
+/// `raw` is misaligned.
 ///
-/// - `expected_dim` : nombre de `f32` attendus.
-/// - `raw` : octets bruts du payload protobuf.
-/// - `scratch` : buffer aligné, utilisé uniquement en cas de désalignement.
+/// - `expected_dim`: number of expected `f32` values.
+/// - `raw`: raw bytes from the protobuf payload.
+/// - `scratch`: aligned buffer, used only on misalignment.
 ///
-/// En cas de succès :
-/// - `Cow::Borrowed(raw_as_f32)` si zero-copy.
-/// - `Cow::Borrowed(scratch_as_f32)` si copie. Le lifetime reste `'a` grâce
-///   au re-borrow de `scratch`.
+/// On success:
+/// - `Cow::Borrowed(raw_as_f32)` for zero-copy.
+/// - `Cow::Borrowed(scratch_as_f32)` after copy. The lifetime stays `'a`
+///   thanks to the re-borrow of `scratch`.
 pub fn validate_and_align<'a>(
     raw: &'a [u8],
     expected_dim: usize,
     scratch: &'a mut AlignedBuffer,
 ) -> Result<Cow<'a, [f32]>, Error> {
-    // Multiplication checked : un `expected_dim` absurdement grand ne doit
-    // pas wraper silencieusement.
+    // Checked multiplication: an absurdly large `expected_dim` must not
+    // silently wrap.
     let expected_bytes = expected_dim.checked_mul(4).ok_or(Error::InvalidDim {
         expected: expected_dim,
         got: raw.len(),
@@ -40,13 +40,13 @@ pub fn validate_and_align<'a>(
         });
     }
 
-    // La longueur est OK. Reste uniquement l'alignement à tester.
+    // Length is OK. Only alignment remains to check.
     match bytemuck::try_cast_slice::<u8, f32>(raw) {
         Ok(slice) => Ok(Cow::Borrowed(slice)),
         Err(_) => {
-            // Désalignement : on copie une fois dans le scratch aligné.
-            // La métrique `misaligned_copies_total` trace ce taux : au-delà
-            // de 1 % en prod, c'est un signal à investiguer côté producteur.
+            // Misalignment: copy once into the aligned scratch.
+            // The `misaligned_copies_total` metric tracks this rate: above
+            // 1 % in prod, it's a signal to investigate the producer side.
             metrics::counter!("misaligned_copies_total").increment(1);
             scratch.copy_from_slice(raw)?;
             let aligned = scratch.as_f32()?;
@@ -55,19 +55,19 @@ pub fn validate_and_align<'a>(
     }
 }
 
-/// Calcule `Σ xᵢ²` en rejetant les vecteurs contenant des NaN/Inf.
+/// Computes `Σ xᵢ²`, rejecting vectors containing NaN/Inf.
 ///
-/// Stratégie : huit accumulateurs parallèles pour briser la chaîne de
-/// dépendance séquentielle d'une réduction scalaire. LLVM peut alors générer
-/// AVX2 `vmulps` + `vaddps` avec ILP, sans réordonner les additions (compatible
-/// IEEE 754 strict, pas besoin de `-C fast-math`).
+/// Strategy: eight parallel accumulators to break the sequential dependency
+/// chain of a scalar reduction. LLVM can then emit AVX2 `vmulps` + `vaddps`
+/// with ILP, without reordering additions (strict IEEE 754 compatible, no
+/// need for `-C fast-math`).
 ///
-/// Détection NaN/Inf : hors du hot path. On exploite la propagation IEEE 754
-/// (NaN/Inf se propagent à travers `*` et `+`), et on vérifie la somme en
-/// sortie. Si non finie, un second passage (rare path) remonte l'erreur.
+/// NaN/Inf detection: off the hot path. We exploit IEEE 754 propagation
+/// (NaN/Inf propagate through `*` and `+`) and check the sum at the end.
+/// If non-finite, a second pass (rare path) surfaces the error.
 ///
-/// La norme au carré suffit pour décider d'une normalisation (comparaison
-/// à `1 ± ε`) ; la racine n'est tirée que si la normalisation est nécessaire.
+/// The squared norm is enough to decide whether to normalize (comparison
+/// to `1 ± ε`); the square root is only taken if normalization is needed.
 #[inline]
 pub fn l2_norm_squared(v: &[f32]) -> Result<f32, Error> {
     let chunks = v.chunks_exact(8);
@@ -91,7 +91,7 @@ pub fn l2_norm_squared(v: &[f32]) -> Result<f32, Error> {
     if sum.is_finite() {
         return Ok(sum);
     }
-    // Rare path : NaN/Inf en entrée, ou overflow sur sum (cas pathologique).
+    // Rare path: NaN/Inf in input, or overflow on sum (pathological case).
     for &x in v {
         if !x.is_finite() {
             return Err(Error::InvalidNumeric);
@@ -100,9 +100,9 @@ pub fn l2_norm_squared(v: &[f32]) -> Result<f32, Error> {
     Err(Error::InvalidNumeric)
 }
 
-/// Normalise `v` in-place si nécessaire. Retourne `true` si une division a
-/// effectivement eu lieu, `false` si le vecteur était déjà suffisamment proche
-/// de la norme unité (|norm² - 1| ≤ 2×10⁻⁶) ou s'il est nul (norm² = 0).
+/// Normalizes `v` in place if needed. Returns `true` if a division actually
+/// occurred, `false` if the vector was already close enough to unit norm
+/// (|norm² - 1| ≤ 2×10⁻⁶) or is the zero vector (norm² = 0).
 #[inline]
 pub fn normalize_in_place(v: &mut [f32], norm_squared: f32) -> bool {
     const TOLERANCE: f32 = 2e-6;
@@ -110,7 +110,7 @@ pub fn normalize_in_place(v: &mut [f32], norm_squared: f32) -> bool {
         return false;
     }
     if norm_squared <= 0.0 {
-        // Vecteur nul : pas de direction, on laisse tel quel.
+        // Zero vector: no direction, leave as-is.
         return false;
     }
     let norm = norm_squared.sqrt();
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn aligned_input_is_zero_copy() {
-        // Source venant d'un Vec<f32> : alignement garanti.
+        // Source from a Vec<f32>: alignment guaranteed.
         let input = vec![1.0f32, 2.0, 3.0, 4.0];
         let raw: &[u8] = bytemuck::cast_slice(&input);
         let mut scratch = AlignedBuffer::new(64);
@@ -140,7 +140,7 @@ mod tests {
         let view = validate_and_align(raw, 4, &mut scratch).expect("alignement OK");
         assert_eq!(&*view, &[1.0, 2.0, 3.0, 4.0]);
 
-        // Pointeur de la vue == pointeur des octets d'entrée → zero-copy.
+        // View pointer == input bytes pointer → zero-copy.
         let view_ptr = view.as_ptr() as usize;
         let raw_ptr = raw.as_ptr() as usize;
         assert_eq!(
@@ -151,13 +151,12 @@ mod tests {
 
     #[test]
     fn misaligned_input_is_copied_to_scratch() {
-        // Pour garantir un désalignement fiable (miri ne respecte pas les
-        // alignements stack par défaut), on stocke dans un `[u32; 5]` dont
-        // la base est 4-alignée, puis on prend &bytes[1..17] : forcément
-        // non multiple de 4.
+        // To guarantee reliable misalignment (miri does not honor stack
+        // alignments by default), we store into a `[u32; 5]` whose base is
+        // 4-aligned, then take &bytes[1..17]: necessarily not a multiple of 4.
         let floats = [1.0f32, 2.0, 3.0, 4.0];
-        let raw_bytes = bytes_of(&floats); // 16 octets alignés
-        let mut backing = [0u32; 5]; // 20 octets, 4-aligné garanti
+        let raw_bytes = bytes_of(&floats); // 16 aligned bytes
+        let mut backing = [0u32; 5]; // 20 bytes, 4-aligned guaranteed
         let shifted: &mut [u8] = bytemuck::cast_slice_mut(&mut backing);
         shifted[1..1 + raw_bytes.len()].copy_from_slice(&raw_bytes);
         let misaligned: &[u8] = &shifted[1..17];
@@ -168,7 +167,7 @@ mod tests {
         let view = validate_and_align(misaligned, 4, &mut scratch).expect("copie OK");
 
         assert_eq!(&*view, &[1.0, 2.0, 3.0, 4.0]);
-        // Le pointeur de la vue N'EST PAS dans la plage de `misaligned`.
+        // The view pointer is NOT inside the `misaligned` range.
         let vp = view.as_ptr() as usize;
         let mp = misaligned.as_ptr() as usize;
         assert!(
@@ -179,7 +178,7 @@ mod tests {
 
     #[test]
     fn wrong_size_is_invalid_dim() {
-        let raw = vec![0u8; 15]; // 15 octets pour dim=4 (16 attendus)
+        let raw = vec![0u8; 15]; // 15 bytes for dim=4 (16 expected)
         let mut scratch = AlignedBuffer::new(64);
         let err = validate_and_align(&raw, 4, &mut scratch).expect_err("dim wrong");
         match err {
@@ -193,7 +192,7 @@ mod tests {
 
     #[test]
     fn oversize_is_invalid_dim() {
-        let raw = vec![0u8; 24]; // 24 octets pour dim=4 (16 attendus)
+        let raw = vec![0u8; 24]; // 24 bytes for dim=4 (16 expected)
         let mut scratch = AlignedBuffer::new(64);
         let err = validate_and_align(&raw, 4, &mut scratch).expect_err("oversize");
         assert!(matches!(err, Error::InvalidDim { .. }));
@@ -201,7 +200,7 @@ mod tests {
 
     #[test]
     fn l2_norm_normal_vector() {
-        let v = [3.0f32, 4.0]; // norme = 5, norme² = 25
+        let v = [3.0f32, 4.0]; // norm = 5, norm² = 25
         let got = l2_norm_squared(&v).unwrap();
         assert!((got - 25.0).abs() < 1e-5);
     }
@@ -228,7 +227,7 @@ mod tests {
 
     #[test]
     fn normalize_skips_already_normalized() {
-        // Vecteur unitaire aligné sur un axe : norme² = 1 exactement.
+        // Unit vector aligned on one axis: norm² = exactly 1.
         let mut v = [1.0f32, 0.0, 0.0];
         let before = v;
         let changed = normalize_in_place(&mut v, 1.0);
@@ -238,7 +237,7 @@ mod tests {
 
     #[test]
     fn normalize_within_tolerance_skips() {
-        let mut v = [0.5f32; 4]; // norme² = 1.0 exactement (4 × 0.25)
+        let mut v = [0.5f32; 4]; // norm² = exactly 1.0 (4 × 0.25)
         let before = v;
         let changed = normalize_in_place(&mut v, 1.000_001);
         assert!(!changed);
@@ -268,8 +267,8 @@ mod tests {
 
     #[test]
     fn pipeline_end_to_end() {
-        // Scénario type : bytes aligned → norme² → normalize → vérif.
-        let floats = vec![0.0f32, 3.0, 4.0, 0.0]; // norme = 5
+        // Typical scenario: bytes aligned → norm² → normalize → check.
+        let floats = vec![0.0f32, 3.0, 4.0, 0.0]; // norm = 5
         let raw = bytes_of(&floats);
         let mut scratch = AlignedBuffer::new(64);
 
@@ -277,9 +276,9 @@ mod tests {
         let n2 = l2_norm_squared(&view).unwrap();
         assert!((n2 - 25.0).abs() < 1e-5);
 
-        // Pour normaliser, on a besoin d'un buffer mutable. Dans le vrai
-        // pipeline, on copiera la vue dans un buffer de sortie. Ici, on teste
-        // la fonction sur un vec local.
+        // To normalize, we need a mutable buffer. In the real pipeline we
+        // copy the view into an output buffer. Here we test the function on
+        // a local vec.
         let mut owned: Vec<f32> = view.to_vec();
         drop(view);
         let changed = normalize_in_place(&mut owned, n2);

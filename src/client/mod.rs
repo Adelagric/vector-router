@@ -1,9 +1,9 @@
-//! Couche d'abstraction sur la base vectorielle.
+//! Abstraction layer over the vector database.
 //!
-//! Le trait `VectorDbClient` est la frontière entre notre pipeline et le backend
-//! concret (Qdrant aujourd'hui, autre demain si besoin). Toute logique propre à
-//! un vendor vit derrière ce trait. Les types de paramètres sont owned pour
-//! éviter toute friction de lifetime à travers `.await`.
+//! The `VectorDbClient` trait is the boundary between our pipeline and the
+//! concrete backend (Qdrant today, something else tomorrow if needed). Any
+//! vendor-specific logic lives behind this trait. Parameter types are owned
+//! to avoid lifetime friction across `.await`.
 
 use std::collections::HashMap;
 
@@ -17,7 +17,7 @@ pub mod qdrant;
 pub use noop::NoopVdbClient;
 pub use qdrant::QdrantVdbClient;
 
-/// Paramètres d'ingestion d'un point unique.
+/// Parameters for ingesting a single point.
 #[derive(Debug, Clone)]
 pub struct UpsertParams {
     pub namespace: String,
@@ -26,19 +26,19 @@ pub struct UpsertParams {
     pub metadata: HashMap<String, String>,
 }
 
-/// Paramètres de recherche kNN.
+/// Parameters for a kNN search.
 #[derive(Debug, Clone)]
 pub struct SearchParams {
     pub namespace: String,
     pub vector: Vec<f32>,
     pub limit: u32,
-    /// Seuil de score minimum. `None` = pas de filtrage.
+    /// Minimum score threshold. `None` = no filtering.
     pub score_threshold: Option<f32>,
-    /// Filtre égalité clé/valeur sur les métadonnées des points stockés.
+    /// Key/value equality filter on the metadata of stored points.
     pub metadata_filter: HashMap<String, String>,
 }
 
-/// Résultat individuel d'une recherche.
+/// Individual search result.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchHit {
     pub point_id: String,
@@ -46,40 +46,40 @@ pub struct SearchHit {
     pub metadata: HashMap<String, String>,
 }
 
-/// Contrat générique avec une base vectorielle.
+/// Generic contract with a vector database.
 ///
-/// Toute implémentation doit être `Send + Sync + 'static` pour pouvoir être
-/// stockée derrière un `Arc<dyn VectorDbClient>` dans les handlers gRPC.
+/// Any implementation must be `Send + Sync + 'static` so it can be stored
+/// behind an `Arc<dyn VectorDbClient>` in the gRPC handlers.
 #[async_trait]
 pub trait VectorDbClient: Send + Sync + 'static {
-    /// Ingestion d'un point dans la base. Idempotent côté Qdrant : un second
-    /// upsert avec le même `point_id` remplace la valeur précédente.
+    /// Ingests a point into the database. Idempotent on the Qdrant side: a
+    /// second upsert with the same `point_id` replaces the previous value.
     async fn upsert(&self, params: UpsertParams) -> Result<(), Error>;
 
-    /// Recherche des k plus proches voisins dans la collection indiquée.
+    /// Searches the k nearest neighbors in the given collection.
     async fn search(&self, params: SearchParams) -> Result<Vec<SearchHit>, Error>;
 
-    /// Ping de santé léger. Sert à alimenter `/ready` et supervision.
+    /// Lightweight health ping. Feeds `/ready` and supervision.
     async fn health(&self) -> Result<(), Error>;
 
-    /// Nombre d'opérations VDB actuellement en vol. Par défaut `0` pour les
-    /// backends qui ne tracent pas cette information. Surchargé par
-    /// `QdrantVdbClient` via son `AtomicU64` interne (voir `InflightGuard`).
+    /// Number of VDB operations currently in flight. Default `0` for
+    /// backends that don't track this. Overridden by `QdrantVdbClient` via
+    /// its internal `AtomicU64` (see `InflightGuard`).
     fn inflight(&self) -> u64 {
         0
     }
 }
 
-// --- Tests avec mock hand-rolled --------------------------------------------
+// --- Tests with a hand-rolled mock ------------------------------------------
 
 #[cfg(test)]
 pub(crate) mod mock {
     use super::*;
     use std::sync::Mutex;
 
-    /// Mock minimaliste qui enregistre les appels et retourne des réponses
-    /// programmables. Utilisé pour tester les handlers (étape 7) et la
-    /// cohérence de l'API sans avoir à démarrer un vrai serveur gRPC.
+    /// Minimal mock that records calls and returns programmable responses.
+    /// Used to test the handlers (step 7) and API consistency without
+    /// having to start a real gRPC server.
     pub struct MockVdbClient {
         pub upserts: Mutex<Vec<UpsertParams>>,
         pub searches: Mutex<Vec<SearchParams>>,

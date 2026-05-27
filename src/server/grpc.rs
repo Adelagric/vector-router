@@ -1,17 +1,20 @@
-//! Serveur gRPC exposant les RPC `Upsert` et `Search` du service `VectorRouter`.
+//! gRPC server exposing the `Upsert` and `Search` RPCs of the
+//! `VectorRouter` service.
 //!
-//! Architecture :
-//! - `validate_and_prepare` : fonction synchrone partagée entre les deux RPC.
-//!   Résolution modèle + validation dim + alignement + norme² + normalisation.
-//!   Produit un `Vec<f32>` owned : on relâche le `PooledBuffer` AVANT tout
-//!   `.await`, ce qui évite toute friction de lifetime avec le runtime async.
-//!   Pattern validé par `tests/lifetime_spike.rs`.
-//! - `call_vdb_with_retry` : wrapper de retry exponentiel sur timeout,
-//!   appelé par les deux handlers avec un closure qui clone les params par
-//!   appel. Le clone est borné (≤ max_retries fois) et n'a lieu que sur le
-//!   chemin rare ; le chemin nominal fait une copie unique.
-//! - `#[tonic::async_trait]` sur l'impl pour satisfaire le trait généré
-//!   (voir `tests/lifetime_spike.rs` ; sans cette annotation, erreur E0195).
+//! Architecture:
+//! - `validate_and_prepare`: synchronous function shared by both RPCs.
+//!   Model resolution + dim validation + alignment + squared norm +
+//!   normalization. Produces an owned `Vec<f32>`: we release the
+//!   `PooledBuffer` BEFORE any `.await`, which avoids any lifetime
+//!   friction with the async runtime. Pattern validated by
+//!   `tests/lifetime_spike.rs`.
+//! - `call_vdb_with_retry`: exponential retry wrapper on timeout, called
+//!   by both handlers with a closure that clones params per attempt. The
+//!   clone is bounded (≤ max_retries times) and happens only on the rare
+//!   path; the nominal path makes a single copy.
+//! - `#[tonic::async_trait]` on the impl to satisfy the generated trait
+//!   (see `tests/lifetime_spike.rs`; without this annotation, error
+//!   E0195).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -33,7 +36,7 @@ use crate::proto::vector_router::v1::{
 };
 use crate::registry::Registry;
 
-// --- Politique de retry ----------------------------------------------------
+// --- Retry policy ----------------------------------------------------------
 
 #[derive(Clone)]
 struct RetryPolicy {
@@ -50,10 +53,10 @@ impl RetryPolicy {
     }
 }
 
-/// Détecte si une erreur VDB est "transitive" (candidate au retry).
-/// On reste strict : seuls les timeouts déclenchent un retry. Les erreurs
-/// logiques ou 4xx/5xx remontent immédiatement pour éviter de masquer un
-/// vrai problème de schéma ou d'auth par du bruit de retries.
+/// Detects whether a VDB error is "transient" (retry candidate).
+/// We stay strict: only timeouts trigger a retry. Logical errors or 4xx/5xx
+/// surface immediately to avoid masking a real schema or auth problem with
+/// retry noise.
 fn is_transient(err: &Error) -> bool {
     matches!(err, Error::Vdb(msg) if msg.starts_with("timeout"))
 }
@@ -82,16 +85,16 @@ impl VectorRouterService {
         }
     }
 
-    /// Pipeline partagé Upsert/Search. **Synchrone** : tout le travail qui
-    /// touche au pool et à la validation se fait avant le premier `.await`.
-    /// Retourne un `Vec<f32>` owned, prêt à partir vers la VDB.
+    /// Shared Upsert/Search pipeline. **Synchronous**: all the work that
+    /// touches the pool and validation happens before the first `.await`.
+    /// Returns an owned `Vec<f32>` ready to go to the VDB.
     fn validate_and_prepare(
         &self,
         model_id: &str,
         dim: u32,
         raw_vector: &[u8],
     ) -> Result<ValidatedVector, Error> {
-        // Un seul .load() par requête (via Registry::get).
+        // A single .load() per request (via Registry::get).
         let spec = self
             .registry
             .get(model_id)
@@ -110,8 +113,8 @@ impl VectorRouterService {
         let view = validate_and_align(raw_vector, spec.dim, &mut pooled)?;
         let n2 = l2_norm_squared(&view)?;
 
-        // Passage Cow → Vec<f32> owned : la vue ne borrow plus `pooled`,
-        // ce qui permet de libérer le buffer avant l'appel VDB async.
+        // Cow → owned Vec<f32>: the view no longer borrows `pooled`, which
+        // lets us release the buffer before the async VDB call.
         let mut owned: Vec<f32> = view.into_owned();
         drop(pooled);
 
@@ -128,8 +131,8 @@ impl VectorRouterService {
         })
     }
 
-    /// Retry exponentiel sur les erreurs transitoires, tentative unique pour
-    /// les erreurs logiques. Le closure `op` est appelé 1..=max_retries fois.
+    /// Exponential retry on transient errors, single attempt for logical
+    /// errors. The closure `op` is called 1..=max_retries times.
     async fn call_vdb_with_retry<F, Fut, T>(&self, mut op: F) -> Result<T, Error>
     where
         F: FnMut() -> Fut,
@@ -148,12 +151,12 @@ impl VectorRouterService {
                     }
                     last_err = Some(e);
                     tokio::time::sleep(delay).await;
-                    // Saturating pour ne pas overflow sur max_retries exotique.
+                    // Saturating to avoid overflow on exotic max_retries.
                     delay = delay.saturating_mul(2);
                 }
             }
         }
-        // Atteint uniquement si max_retries == 0 (interdit par validate()).
+        // Only reached if max_retries == 0 (forbidden by validate()).
         Err(last_err.unwrap_or_else(|| Error::Vdb("retry loop vide".to_string())))
     }
 }
@@ -164,15 +167,15 @@ struct ValidatedVector {
     was_normalized: bool,
 }
 
-// --- Builder du serveur tonic ---------------------------------------------
+// --- tonic server builder --------------------------------------------------
 
-/// Assemble le `Router` tonic avec les protections demandées par le brief :
-/// - `max_decoding_message_size` limite la taille des payloads entrants AVANT
-///   parsing (rejet en amont du pipeline).
-/// - `ConcurrencyLimitLayer` borne le nombre de requêtes traitées en parallèle
-///   pour éviter de saturer le VDB downstream.
+/// Assembles the tonic `Router` with the protections the brief calls for:
+/// - `max_decoding_message_size` caps the size of incoming payloads BEFORE
+///   parsing (rejection upstream of the pipeline).
+/// - `ConcurrencyLimitLayer` bounds the number of requests processed in
+///   parallel to avoid saturating the downstream VDB.
 ///
-/// Appelé depuis `main.rs` pour construire le serveur prêt à `serve(addr)`.
+/// Called from `main.rs` to build the server ready for `serve(addr)`.
 pub fn build_grpc_server(
     service: VectorRouterService,
     cfg: &ServerConfig,
@@ -187,7 +190,7 @@ pub fn build_grpc_server(
         .add_service(svc)
 }
 
-// --- Mapping Error → tonic::Status -----------------------------------------
+// --- Error → tonic::Status mapping -----------------------------------------
 
 fn status_from_error(err: Error) -> Status {
     match err {
@@ -209,8 +212,8 @@ fn status_from_error(err: Error) -> Status {
     }
 }
 
-/// Label `status` pour la métrique `requests_total`, déduit de la variante
-/// d'erreur. Aligné sur les codes utilisés dans le brief initial.
+/// `status` label for the `requests_total` metric, derived from the error
+/// variant. Aligned with the codes used in the initial brief.
 fn status_label_from_error(err: &Error) -> &'static str {
     match err {
         Error::UnknownModel { .. } => "unknown_model",
@@ -221,14 +224,13 @@ fn status_label_from_error(err: &Error) -> &'static str {
     }
 }
 
-/// Normalise l'identifiant producteur reçu en protocole gRPC.
+/// Normalizes the producer identifier received on the gRPC wire.
 ///
-/// Un `producer_id` vide (champ proto3 absent ou explicitement "") est
-/// remplacé par `"unknown"` pour éviter une chaîne vide dans les labels
-/// Prometheus. Contrat avec l'appelant : l'ensemble des `producer_id`
-/// remontés doit rester borné (noms de service, pas d'UUID) — toute
-/// explosion de cardinalité est imputable à l'intégration client, pas au
-/// middleware. Cf. commentaire dans router.proto.
+/// An empty `producer_id` (proto3 field absent or explicitly "") is
+/// replaced by `"unknown"` to avoid an empty string in Prometheus labels.
+/// Caller contract: the set of `producer_id` values must remain bounded
+/// (service names, not UUIDs) — any cardinality explosion is on the
+/// client integration, not the middleware. Cf. comment in router.proto.
 fn normalize_producer(producer_id: &str) -> &str {
     if producer_id.is_empty() {
         "unknown"
@@ -237,11 +239,11 @@ fn normalize_producer(producer_id: &str) -> &str {
     }
 }
 
-/// Enregistre une requête terminée : incrémente `requests_total` avec
-/// (`model_id`, `op`, `status`, `producer_id`) et enregistre la durée dans
-/// `request_duration_seconds`. `model_id = "unknown"` si le lookup a échoué
-/// (le label reste borné). `producer_id` est déjà normalisé par
-/// [`normalize_producer`].
+/// Records a completed request: increments `requests_total` with
+/// (`model_id`, `op`, `status`, `producer_id`) and records the duration
+/// in `request_duration_seconds`. `model_id = "unknown"` if the lookup
+/// failed (the label stays bounded). `producer_id` is already normalized
+/// by [`normalize_producer`].
 fn record_request_metrics(
     model_id: &str,
     op: &'static str,
@@ -266,21 +268,21 @@ fn record_request_metrics(
     .record(duration_s);
 }
 
-/// Journal de rejet structuré (JSON Lines sur stderr).
+/// Structured rejection log (JSON Lines on stderr).
 ///
-/// Émis pour toute requête rejetée par `validate_and_prepare`, afin de
-/// permettre la post-mortem forensique : quel producteur envoie des
-/// vecteurs mal formés, quelle dimension, quel modèle. Volontairement
-/// séparé de la métrique Prometheus : les métriques sont agrégées, le log
-/// garde la granularité point-par-point pour investigation.
+/// Emitted for any request rejected by `validate_and_prepare`, to enable
+/// forensic post-mortems: which producer is sending malformed vectors,
+/// what dimension, what model. Deliberately separate from the Prometheus
+/// metric: metrics are aggregated, the log keeps per-point granularity
+/// for investigation.
 ///
-/// Format volontairement minimal — pas de trace ID, pas de corrélation
-/// distribuée : c'est un outil de debug, pas un audit trail. Un opérateur
-/// peut `grep | jq` sans chaîne de tooling complexe.
+/// Format deliberately minimal — no trace ID, no distributed correlation:
+/// this is a debug tool, not an audit trail. An operator can `grep | jq`
+/// without a complex tooling chain.
 ///
-/// Écrit sur stderr (pas stdout) pour ne pas polluer une éventuelle sortie
-/// structurée du binaire, et ne pas être capturé par une redirection
-/// applicative.
+/// Written to stderr (not stdout) so it doesn't pollute any structured
+/// output of the binary, and isn't captured by an application
+/// redirection.
 fn log_rejection(op: &'static str, producer_id: &str, model_id: &str, status: &str, reason: &str) {
     let entry = serde_json::json!({
         "event": "rejection",
@@ -293,7 +295,7 @@ fn log_rejection(op: &'static str, producer_id: &str, model_id: &str, status: &s
     eprintln!("{entry}");
 }
 
-// --- Impl du trait tonic ---------------------------------------------------
+// --- tonic trait impl ------------------------------------------------------
 
 #[tonic::async_trait]
 impl VectorRouter for VectorRouterService {
@@ -484,7 +486,7 @@ mod tests {
             api_key: None,
             timeout_ms: 5000,
             max_retries: 3,
-            retry_base_delay_ms: 1, // rapide pour tests
+            retry_base_delay_ms: 1, // fast for tests
         };
         VectorRouterService::new(registry, pool, vdb, &vdb_cfg)
     }
@@ -532,7 +534,7 @@ mod tests {
         let mock = Arc::new(MockVdbClient::new());
         let svc = make_service(mock.clone());
 
-        // [3, 4, 0, 0] → norme = 5 → normalisé → [0.6, 0.8, 0, 0]
+        // [3, 4, 0, 0] → norm = 5 → normalized → [0.6, 0.8, 0, 0]
         let floats = [3.0f32, 4.0, 0.0, 0.0];
         let resp = svc.upsert(upsert_req("m1", 4, &floats)).await.unwrap();
         let inner = resp.into_inner();
@@ -552,7 +554,7 @@ mod tests {
         let mock = Arc::new(MockVdbClient::new());
         let svc = make_service(mock.clone());
 
-        // m2.normalize = false → vecteur envoyé tel quel.
+        // m2.normalize = false → vector sent as-is.
         let floats = [3.0f32, 4.0];
         let resp = svc.upsert(upsert_req("m2", 2, &floats)).await.unwrap();
         assert!(!resp.into_inner().was_normalized);
@@ -580,7 +582,7 @@ mod tests {
         let mock = Arc::new(MockVdbClient::new());
         let svc = make_service(mock.clone());
         let floats = [1.0f32, 2.0, 3.0];
-        // m1 attend dim 4, on envoie 3
+        // m1 expects dim 4, we send 3
         let err = svc.upsert(upsert_req("m1", 3, &floats)).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
@@ -588,22 +590,22 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn upsert_propagates_permanent_vdb_error_without_retry() {
         let mock = Arc::new(MockVdbClient::new());
-        mock.set_failure("schema mismatch"); // non-transitive
+        mock.set_failure("schema mismatch"); // non-transient
         let svc = make_service(mock.clone());
 
         let floats = [1.0f32, 0.0, 0.0, 0.0];
         let err = svc.upsert(upsert_req("m1", 4, &floats)).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unavailable);
 
-        // Une seule tentative (pas de retry sur erreur non-transitive).
+        // Single attempt (no retry on non-transient error).
         assert_eq!(mock.upserts.lock().expect("mutex").len(), 0);
-        // (Le mock set_failure rejette avant d'enregistrer l'upsert)
+        // (The mock's set_failure rejects before recording the upsert.)
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn upsert_retries_on_transient_then_fails() {
         let mock = Arc::new(MockVdbClient::new());
-        mock.set_failure("timeout upsert"); // classé transitoire
+        mock.set_failure("timeout upsert"); // classified as transient
         let svc = make_service(mock.clone());
 
         let floats = [1.0f32, 0.0, 0.0, 0.0];
@@ -612,8 +614,8 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(err.code(), tonic::Code::Unavailable);
-        // max_retries=3, base_delay=1ms → backoff attendu ~1+2 = 3ms min.
-        // On vérifie juste qu'il y a eu retry (durée > 0).
+        // max_retries=3, base_delay=1ms → expected backoff ~1+2 = 3ms min.
+        // Just check that a retry occurred (duration > 0).
         assert!(
             elapsed >= Duration::from_millis(2),
             "retry attendu, elapsed {elapsed:?}"
@@ -645,7 +647,7 @@ mod tests {
         assert!((inner.hits[0].score - 0.95).abs() < 1e-6);
         assert_eq!(inner.vdb_namespace, "ns-m1");
 
-        // Le vecteur de requête doit avoir été normalisé (m1.normalize=true).
+        // The query vector must have been normalized (m1.normalize=true).
         let searches = mock.searches.lock().expect("mutex");
         let v = &searches[0].vector;
         let norm_sq: f32 = v.iter().map(|x| x * x).sum();
@@ -657,7 +659,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn search_threshold_zero_becomes_none() {
-        // Vérifie la convention "score_threshold=0.0 proto = pas de filtre".
+        // Verifies the "score_threshold=0.0 proto = no filter" convention.
         let mock = Arc::new(MockVdbClient::new());
         let svc = make_service(mock.clone());
         let floats = [1.0f32, 0.0, 0.0, 0.0];
@@ -668,8 +670,9 @@ mod tests {
 
     #[test]
     fn build_grpc_server_accepts_valid_config() {
-        // Smoke test du builder : la fonction doit construire un Router sans panic.
-        // L'exécution TCP est couverte en étape 10 (tests d'intégration).
+        // Smoke test of the builder: the function must build a Router
+        // without panicking. TCP execution is covered in step 10
+        // (integration tests).
         let mock = Arc::new(MockVdbClient::new());
         let svc = make_service(mock);
         let server_cfg = ServerConfig {
@@ -679,15 +682,15 @@ mod tests {
             max_decoding_message_size_bytes: 4 * 1024 * 1024,
         };
         let _router = build_grpc_server(svc, &server_cfg);
-        // Si on arrive ici sans panic, le Stack<ConcurrencyLimit, Identity>
-        // compile et se construit correctement.
+        // If we get here without panicking, the
+        // Stack<ConcurrencyLimit, Identity> compiles and builds correctly.
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn pool_is_released_before_vdb_call() {
-        // On utilise un pool de taille 1 et on lance 2 requêtes séquentielles.
-        // Si le pool n'était pas libéré avant l'appel VDB, la 2e requête devrait
-        // passer par le fallback (exhausted_count > 0). Ici, on attend 0.
+        // Pool of size 1 and two sequential requests. If the pool weren't
+        // released before the VDB call, the 2nd request would fall back
+        // (exhausted_count > 0). Here we expect 0.
         let mock = Arc::new(MockVdbClient::new());
         let mut models = HashMap::new();
         models.insert(

@@ -1,7 +1,7 @@
-//! Middleware de routage vectoriel : bibliothèque interne.
+//! Vector routing middleware: internal library.
 //!
-//! Le binaire `vector-router` consomme cette bibliothèque ; la séparation
-//! évite que le code soit marqué mort tant qu'il n'a pas de consommateur final.
+//! The `vector-router` binary consumes this library; the split prevents the
+//! code from being flagged as dead until it has a final consumer.
 
 pub mod client;
 pub mod config;

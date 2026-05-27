@@ -1,5 +1,5 @@
-//! Serveurs applicatifs : gRPC (`grpc`) pour le trafic métier,
-//! HTTP (`http`) pour l'observabilité (health, ready, metrics).
+//! Application servers: gRPC (`grpc`) for business traffic,
+//! HTTP (`http`) for observability (health, ready, metrics).
 
 pub mod grpc;
 pub mod http;

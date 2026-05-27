@@ -1,20 +1,20 @@
-//! Point d'entrée du binaire `vector-router`.
+//! Entry point for the `vector-router` binary.
 //!
-//! Séquence de démarrage :
-//! 1. Chargement de la config (TOML + env `VR_*`).
-//! 2. Construction du runtime tokio multi-thread (taille configurable via
+//! Startup sequence:
+//! 1. Load config (TOML + `VR_*` env vars).
+//! 2. Build the multi-thread tokio runtime (size configurable via
 //!    `config.pool.worker_threads`).
-//! 3. Installation du recorder Prometheus — **fail-fast** : l'observabilité
-//!    est un prérequis opérationnel, pas une option.
-//! 4. Démarrage du service via `service::start_service` : gRPC, HTTP, gauge
-//!    updater en parallèle, avec signal de shutdown broadcast.
-//! 5. Attente de SIGTERM / SIGINT.
-//! 6. Propagation du shutdown et drain borné (30 s par défaut).
+//! 3. Install the Prometheus recorder — **fail-fast**: observability is an
+//!    operational prerequisite, not an option.
+//! 4. Start the service via `service::start_service`: gRPC, HTTP, gauge
+//!    updater in parallel, with a broadcast shutdown signal.
+//! 5. Wait for SIGTERM / SIGINT.
+//! 6. Propagate shutdown and bounded drain (30 s default).
 //!
-//! Les règles projet interdisent `unwrap`/`expect` hors `main.rs`. C'est ici
-//! que les dernières `expect()` vivent — sur des opérations où un échec
-//! signifie un problème d'environnement (signal handler indisponible) qu'on
-//! veut faire remonter comme panique plutôt que masquer.
+//! Project rules forbid `unwrap`/`expect` outside `main.rs`. This is where
+//! the remaining `expect()` calls live — on operations where a failure means
+//! an environment issue (e.g. signal handler unavailable) that we want to
+//! surface as a panic rather than mask.
 
 use std::time::Duration;
 
@@ -47,7 +47,7 @@ fn build_runtime(config: &Config) -> std::io::Result<tokio::runtime::Runtime> {
 }
 
 async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>> {
-    // Fail-fast : sans recorder Prometheus, on refuse de démarrer.
+    // Fail-fast: without a Prometheus recorder, refuse to start.
     let metrics_handle = init_metrics()?;
     eprintln!("vector-router : recorder Prometheus installé");
 
@@ -61,7 +61,7 @@ async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     wait_for_shutdown_signal().await;
     eprintln!("vector-router : signal reçu, drain en cours (timeout {DRAIN_TIMEOUT:?})");
 
-    // Propagation : tous les subscribers voient `send(())`.
+    // Propagation: every subscriber sees `send(())`.
     let _ = shutdown_tx.send(());
     handles.drain(DRAIN_TIMEOUT).await?;
     eprintln!("vector-router : drain terminé, arrêt propre");

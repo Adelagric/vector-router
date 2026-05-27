@@ -1,14 +1,14 @@
-//! Spike technique : vérifier que le pattern `Cow<'a, [f32]>` issu du pool
-//! reste utilisable après un `.await` dans un handler Tonic.
+//! Technical spike: verify that the `Cow<'a, [f32]>` pattern from the pool
+//! remains usable after an `.await` inside a Tonic handler.
 //!
-//! Ce fichier n'est PAS un test fonctionnel du service — c'est une preuve de
-//! compilation et une exécution minimale qui valide la compatibilité des
-//! lifetimes entre le pool, `validate_and_align`, et le runtime async tokio.
+//! This file is NOT a functional test of the service — it's a compile
+//! proof and a minimal run that validates lifetime compatibility between
+//! the pool, `validate_and_align`, and the tokio async runtime.
 //!
-//! Critère de succès :
-//! - Le code compile (contraintes Send satisfaites sur la future du handler).
-//! - Le test s'exécute sans panique.
-//! - Le résultat numérique est correct après l'await.
+//! Success criteria:
+//! - The code compiles (Send constraints met on the handler future).
+//! - The test runs without panicking.
+//! - The numeric result is correct after the await.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -49,19 +49,19 @@ impl VectorRouter for SpikeService {
 
         let mut pooled = self.pool.take();
 
-        // --- Le cœur du test : obtention du Cow emprunté. ---
+        // --- The heart of the test: obtaining the borrowed Cow. ---
         let view = validate_and_align(&req.vector, spec.dim, &mut pooled)
             .map_err(|e| Status::invalid_argument(format!("{e}")))?;
 
-        // --- Simulation d'un appel VDB via await. ---
+        // --- Simulate a VDB call via await. ---
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        // --- Utilisation de view après l'await : c'est ce qui doit compiler. ---
+        // --- Use `view` after the await: this is what must compile. ---
         let n2 = l2_norm_squared(&view).map_err(|e| Status::invalid_argument(format!("{e}")))?;
 
         Ok(Response::new(UpsertResponse {
             point_id: req.point_id,
-            processing_us: n2.to_bits() as u64, // on stocke la norme² bit-for-bit
+            processing_us: n2.to_bits() as u64, // we stash the squared norm bit-for-bit
             was_normalized: false,
             vdb_namespace: spec.vdb_namespace,
         }))
@@ -94,7 +94,7 @@ async fn cow_survives_await_in_tonic_handler() {
         registry: registry.clone(),
     };
 
-    // Vecteur test : [1, 2, 3, 4], norme² = 1+4+9+16 = 30.
+    // Test vector: [1, 2, 3, 4], norm² = 1+4+9+16 = 30.
     let floats: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&floats).to_vec();
 
@@ -114,6 +114,6 @@ async fn cow_survives_await_in_tonic_handler() {
     assert!((n2 - 30.0).abs() < 1e-5, "norme² attendue 30, obtenue {n2}");
     assert_eq!(inner.vdb_namespace, "ns-test");
 
-    // Le pool doit avoir récupéré le buffer après le handler.
+    // The pool must have reclaimed the buffer after the handler.
     assert_eq!(pool.available(), 2);
 }

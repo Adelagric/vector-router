@@ -1,10 +1,10 @@
-//! Client VDB no-op : accepte toutes les opérations, répond immédiatement.
+//! No-op VDB client: accepts every operation, responds immediately.
 //!
-//! Utilisé par le binaire de load-test (`bench-server`) pour isoler la
-//! performance du middleware lui-même, sans que la latence réseau et la
-//! capacité de Qdrant ne contaminent les mesures.
+//! Used by the load-test binary (`bench-server`) to isolate the
+//! performance of the middleware itself, so that Qdrant's network latency
+//! and capacity don't contaminate the measurements.
 //!
-//! PAS destiné à la production — il n'effectue aucun stockage réel.
+//! NOT for production — it performs no real storage.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -14,7 +14,7 @@ use crate::error::Error;
 
 use super::{SearchHit, SearchParams, UpsertParams, VectorDbClient};
 
-/// Client VDB qui ne fait rien, pour benchmark du middleware seul.
+/// No-op VDB client, for benchmarking the middleware in isolation.
 #[derive(Default)]
 pub struct NoopVdbClient {
     upserts: AtomicU64,

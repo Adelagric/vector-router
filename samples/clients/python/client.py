@@ -1,17 +1,17 @@
 """
-Client gRPC Python pour vector-router.
+Python gRPC client for vector-router.
 
-Démontre :
-  - chargement runtime du proto via grpcio-tools (pas de codegen pré-build)
-  - encodage f32 little-endian d'un vecteur 1536-dim en `bytes` protobuf
-  - appels Upsert et Search avec un producer_id (pour tracer l'origine côté
-    Prometheus du middleware)
-  - gestion des erreurs de validation (NaN, dimension fausse, modèle inconnu)
-    qui remontent en grpc.StatusCode.INVALID_ARGUMENT
+Demonstrates:
+  - runtime loading of the proto via grpcio-tools (no pre-build codegen)
+  - little-endian f32 encoding of a 1536-dim vector into protobuf `bytes`
+  - Upsert and Search calls with a producer_id (to trace origin on the
+    middleware's Prometheus side)
+  - handling of validation errors (NaN, wrong dimension, unknown model)
+    which surface as grpc.StatusCode.INVALID_ARGUMENT
 
-Usage :
+Usage:
     pip install -r requirements.txt
-    python client.py            # demo end-to-end contre localhost:50051
+    python client.py            # end-to-end demo against localhost:50051
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from grpc_tools import protoc
 
 
 # ---------------------------------------------------------------------------
-# Compilation runtime du .proto — pas de stubs versionnés à committer.
+# Runtime compilation of the .proto — no versioned stubs to commit.
 # ---------------------------------------------------------------------------
 
 PROTO_ROOT = Path(__file__).resolve().parents[3] / "proto"
@@ -37,7 +37,7 @@ GENERATED_DIR = Path(__file__).resolve().parent / "_generated"
 
 
 def ensure_stubs() -> None:
-    """Compile le .proto dans _generated/ si absent ou plus vieux que la source."""
+    """Compile the .proto into _generated/ if missing or older than the source."""
     GENERATED_DIR.mkdir(exist_ok=True)
     (GENERATED_DIR / "__init__.py").touch(exist_ok=True)
 
@@ -63,12 +63,12 @@ def ensure_stubs() -> None:
 
 
 def pack_f32_le(values: list[float]) -> bytes:
-    """Encode une liste de f32 en bytes little-endian (format wire attendu)."""
+    """Encode a list of f32 into little-endian bytes (expected wire format)."""
     return struct.pack(f"<{len(values)}f", *values)
 
 
 def make_demo_vector(dim: int = 1536, seed: int = 42) -> list[float]:
-    """Vecteur déterministe pour reproductibilité ; pas une vraie embedding."""
+    """Deterministic vector for reproducibility; not a real embedding."""
     import random
     rng = random.Random(seed)
     return [rng.gauss(0.0, 1.0) for _ in range(dim)]
@@ -84,7 +84,7 @@ def main() -> int:
     sys.path.insert(0, str(GENERATED_DIR))
     sys.path.insert(0, str(GENERATED_DIR / "vector_router" / "v1"))
 
-    # imports tardifs : générés à l'instant
+    # Late imports: generated just now
     from vector_router.v1 import router_pb2, router_pb2_grpc  # noqa: E402
 
     addr = os.environ.get("VR_ADDR", "localhost:50051")
@@ -111,7 +111,7 @@ def main() -> int:
         except grpc.RpcError as e:
             print(f"[KO] Upsert: {e.code().name}: {e.details()}")
 
-        # 2. Upsert avec NaN — doit être rejeté avec INVALID_ARGUMENT
+        # 2. Upsert with NaN — must be rejected with INVALID_ARGUMENT
         bad = list(vec)
         bad[42] = math.nan
         req_nan = router_pb2.UpsertRequest(
@@ -129,7 +129,7 @@ def main() -> int:
             assert e.code() == grpc.StatusCode.INVALID_ARGUMENT, e
             print(f"[OK] NaN rejeté côté router : {e.details()}")
 
-        # 3. Search avec le même pipeline de validation
+        # 3. Search through the same validation pipeline
         req_search = router_pb2.SearchRequest(
             model_id=model,
             vector=pack_f32_le(vec),

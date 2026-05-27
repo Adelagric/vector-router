@@ -1,14 +1,13 @@
-//! Implémentation concrète de `VectorDbClient` pour Qdrant, basée sur
+//! Concrete `VectorDbClient` implementation for Qdrant, based on
 //! `qdrant-client` 1.12.
 //!
-//! Chaque appel VDB est enveloppé dans `tokio::time::timeout` avec la valeur
-//! `config.vdb.timeout_ms`. La politique de retry (exponentiel, `max_retries`,
-//! erreurs transitoires uniquement) est appliquée sur les erreurs réseau.
+//! Every VDB call is wrapped in `tokio::time::timeout` with the value
+//! `config.vdb.timeout_ms`. The retry policy (exponential, `max_retries`,
+//! transient errors only) is applied on network errors.
 //!
-//! Note technique : le double `tonic` dans l'arbre est documenté dans
-//! `DECISIONS.md`. `qdrant-client` 1.12 utilise tonic 0.12 en interne ;
-//! notre serveur gRPC utilise tonic 0.14. Les deux ne se croisent jamais
-//! au niveau des types.
+//! Technical note: the double `tonic` in the dependency tree is documented
+//! in `DECISIONS.md`. `qdrant-client` 1.12 uses tonic 0.12 internally; our
+//! gRPC server uses tonic 0.14. The two never cross at the type level.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,11 +28,11 @@ use crate::error::Error;
 
 use super::{SearchHit, SearchParams, UpsertParams, VectorDbClient};
 
-/// Wrapper autour du client Qdrant officiel.
+/// Wrapper around the official Qdrant client.
 ///
-/// `inflight` compte les appels VDB en cours, exposable comme métrique de
-/// saturation (Plan A du brief : pas de pool natif accessible, on mesure
-/// l'activité applicative).
+/// `inflight` counts the VDB calls currently in flight, exposable as a
+/// saturation metric (brief's Plan A: no native pool accessible, so we
+/// measure application-level activity).
 pub struct QdrantVdbClient {
     inner: Qdrant,
     timeout: Duration,
@@ -41,15 +40,15 @@ pub struct QdrantVdbClient {
 }
 
 impl QdrantVdbClient {
-    /// Construit un client à partir de la config applicative.
+    /// Builds a client from the application config.
     pub fn new(cfg: &VdbConfig) -> Result<Self, Error> {
         let mut builder = Qdrant::from_url(&cfg.url);
         if let Some(key) = &cfg.api_key {
             builder = builder.api_key(key.clone());
         }
-        // Le timeout du client est défensif ; le timeout effectif par appel
-        // est géré par `tokio::time::timeout` pour garantir un comportement
-        // strict même si la couche transport ne coopère pas.
+        // The client timeout is defensive; the effective per-call timeout
+        // is enforced by `tokio::time::timeout` to guarantee strict
+        // behavior even if the transport layer doesn't cooperate.
         builder = builder.timeout(Duration::from_millis(cfg.timeout_ms));
 
         let inner = builder
@@ -62,13 +61,13 @@ impl QdrantVdbClient {
         })
     }
 
-    /// Nombre d'appels VDB actuellement en vol (gauge pour Prometheus).
+    /// Number of VDB calls currently in flight (gauge for Prometheus).
     pub fn inflight(&self) -> u64 {
         self.inflight.load(Ordering::Relaxed)
     }
 
-    /// Garde RAII qui incrémente `inflight` à l'entrée et le décrémente à la
-    /// sortie. Garantit la cohérence du compteur même sur chemin d'erreur.
+    /// RAII guard that increments `inflight` on entry and decrements it on
+    /// exit. Guarantees counter consistency even on the error path.
     fn track(&self) -> InflightGuard<'_> {
         self.inflight.fetch_add(1, Ordering::Relaxed);
         InflightGuard { owner: self }
@@ -85,7 +84,7 @@ impl Drop for InflightGuard<'_> {
     }
 }
 
-// --- Conversions utilitaires ------------------------------------------------
+// --- Utility conversions ----------------------------------------------------
 
 fn metadata_to_payload(meta: &HashMap<String, String>) -> HashMap<String, Value> {
     meta.iter()
@@ -119,9 +118,9 @@ fn payload_to_metadata(payload: HashMap<String, Value>) -> HashMap<String, Strin
     payload
         .into_iter()
         .filter_map(|(k, v)| {
-            // Qdrant stocke des Value typés ; côté middleware on ne sait
-            // représenter que des strings. Les autres types sont ignorés
-            // silencieusement (avertissement à documenter côté API).
+            // Qdrant stores typed Value entries; the middleware can only
+            // represent strings. Other types are silently ignored (warning
+            // to document on the API side).
             v.kind.and_then(|kind| match kind {
                 qdrant_client::qdrant::value::Kind::StringValue(s) => Some((k, s)),
                 _ => None,
@@ -138,11 +137,11 @@ fn point_id_to_string(id: &Option<PointId>) -> String {
     }
 }
 
-/// Qdrant n'accepte que deux types d'ID de point : un entier `u64` ou un
-/// UUID en représentation string. Si le `point_id` de la requête est
-/// parseable en `u64`, on l'envoie comme `Num`. Sinon on le passe en `Uuid`
-/// (Qdrant rejettera côté serveur si ce n'est pas un UUID valide — erreur
-/// propagée telle quelle au client via `Error::Vdb`).
+/// Qdrant only accepts two point ID types: a `u64` integer or a UUID in
+/// string representation. If the request's `point_id` parses as `u64`, we
+/// send it as `Num`. Otherwise we pass it as `Uuid` (Qdrant will reject it
+/// server-side if it isn't a valid UUID — the error is propagated as-is to
+/// the client via `Error::Vdb`).
 fn point_id_from_string(s: String) -> PointId {
     if let Ok(n) = s.parse::<u64>() {
         PointId {
@@ -155,12 +154,12 @@ fn point_id_from_string(s: String) -> PointId {
     }
 }
 
-// --- Impl VectorDbClient ----------------------------------------------------
+// --- VectorDbClient impl ----------------------------------------------------
 
 #[async_trait]
 impl VectorDbClient for QdrantVdbClient {
     fn inflight(&self) -> u64 {
-        // Réutilise le compteur atomique incrémenté par `InflightGuard`.
+        // Reuses the atomic counter incremented by `InflightGuard`.
         self.inflight.load(Ordering::Relaxed)
     }
 
@@ -258,7 +257,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn timeout_fires_on_unreachable_host() {
-        // Port 1 n'accepte pas de connexion : le timeout doit fire rapidement.
+        // Port 1 doesn't accept connections: the timeout must fire quickly.
         let c = QdrantVdbClient::new(&cfg("http://127.0.0.1:1", 100)).unwrap();
         let params = UpsertParams {
             namespace: "test".to_string(),
@@ -297,9 +296,9 @@ mod tests {
 
     #[test]
     fn point_id_from_arbitrary_string_becomes_uuid_then_rejected_by_qdrant() {
-        // Cas "doc-bench" : ni u64, ni UUID valide. On le route vers Uuid,
-        // Qdrant rejettera côté serveur — comportement voulu (on propage
-        // l'erreur au lieu de masquer la bizarrerie côté client).
+        // "doc-bench" case: neither u64 nor valid UUID. We route it to
+        // Uuid; Qdrant rejects it server-side — intended behavior (we
+        // propagate the error rather than hide the oddness client-side).
         let p = point_id_from_string("doc-bench".to_string());
         match p.point_id_options {
             Some(PointIdOptions::Uuid(s)) => assert_eq!(s, "doc-bench"),
@@ -316,7 +315,7 @@ mod tests {
             vector: vec![0.0],
             metadata: HashMap::new(),
         };
-        // L'appel va échouer (timeout), mais inflight doit revenir à 0.
+        // The call will fail (timeout), but inflight must return to 0.
         let _ = c.upsert(params).await;
         assert_eq!(c.inflight(), 0, "inflight doit revenir à 0 après erreur");
     }

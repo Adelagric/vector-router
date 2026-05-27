@@ -1,19 +1,19 @@
 /**
- * Client gRPC TypeScript pour vector-router.
+ * TypeScript gRPC client for vector-router.
  *
- * Démontre :
- *  - chargement runtime du .proto via @grpc/proto-loader (pas de codegen)
- *  - encodage f32 little-endian d'un vecteur 1536-dim en `Buffer` protobuf
- *  - appels Upsert et Search avec un producer_id (pour tracer l'origine
- *    côté Prometheus du middleware)
- *  - gestion des erreurs de validation (NaN, dimension fausse, modèle
- *    inconnu) qui remontent en grpc.status.INVALID_ARGUMENT
+ * Demonstrates:
+ *  - runtime loading of the .proto via @grpc/proto-loader (no codegen)
+ *  - little-endian f32 encoding of a 1536-dim vector into a protobuf `Buffer`
+ *  - Upsert and Search calls with a producer_id (to trace origin on the
+ *    middleware's Prometheus side)
+ *  - handling of validation errors (NaN, wrong dimension, unknown model)
+ *    which surface as grpc.status.INVALID_ARGUMENT
  *
- * Usage :
+ * Usage:
  *    npm install
- *    npm run demo               # demo end-to-end contre localhost:50051
+ *    npm run demo               # end-to-end demo against localhost:50051
  *
- * Variables d'env :
+ * Env vars:
  *    VR_ADDR       (default: localhost:50051)
  *    VR_MODEL      (default: openai-text-embedding-3-small)
  *    VR_PRODUCER   (default: ts-client)
@@ -29,7 +29,7 @@ import { dirname, resolve } from "node:path";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Encode un Float32Array en Buffer little-endian (format wire `bytes`). */
+/** Encode a Float32Array as a little-endian Buffer (wire format `bytes`). */
 function packF32LE(values: Float32Array): Buffer {
   const buf = Buffer.alloc(values.length * 4);
   for (let i = 0; i < values.length; i++) {
@@ -38,9 +38,9 @@ function packF32LE(values: Float32Array): Buffer {
   return buf;
 }
 
-/** Vecteur déterministe pour reproductibilité ; pas une vraie embedding. */
+/** Deterministic vector for reproducibility; not a real embedding. */
 function makeDemoVector(dim = 1536, seed = 42): Float32Array {
-  // PRNG mulberry32 : déterministe, pas crypto.
+  // mulberry32 PRNG: deterministic, not crypto.
   let s = seed >>> 0;
   const v = new Float32Array(dim);
   for (let i = 0; i < dim; i++) {
@@ -54,7 +54,7 @@ function makeDemoVector(dim = 1536, seed = 42): Float32Array {
 }
 
 // ---------------------------------------------------------------------------
-// Chargement du proto
+// Proto loading
 // ---------------------------------------------------------------------------
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -70,8 +70,8 @@ const def = loadSync(PROTO_PATH, {
   includeDirs: [PROTO_INCLUDE],
 });
 
-// Le service est sous vector_router.v1.VectorRouter dans le proto.
-// loadPackageDefinition typé en `any` côté grpc-js : on encapsule.
+// The service lives at vector_router.v1.VectorRouter in the proto.
+// loadPackageDefinition is typed as `any` on the grpc-js side: wrap it.
 type UpsertRequest = {
   model_id: string;
   point_id: string;
@@ -143,7 +143,7 @@ async function main() {
     console.log(`[KO] Upsert: ${err.code} ${err.details}`);
   }
 
-  // 2. Upsert avec NaN — doit être rejeté avec INVALID_ARGUMENT
+  // 2. Upsert with NaN — must be rejected with INVALID_ARGUMENT
   const bad = new Float32Array(vec);
   bad[42] = NaN;
   try {
@@ -162,7 +162,7 @@ async function main() {
     console.log(`[OK] NaN rejeté côté router : ${err.details}`);
   }
 
-  // 3. Search avec le même pipeline de validation
+  // 3. Search through the same validation pipeline
   try {
     const r = await search(client, {
       model_id: model,
