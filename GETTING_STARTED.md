@@ -1,72 +1,70 @@
-# Vector Router — Prise en main
+# Vector Router — Getting started
 
-**La couche de confiance entre vos agents IA et votre base vectorielle.**
-Vector Router s'intercale entre les producteurs d'embeddings (agents LLM,
-pipelines RAG, jobs d'indexation) et votre base vectorielle. Il valide,
-normalise et route chaque vecteur avant qu'il n'entre en base — pour empêcher
-la corruption silencieuse de la mémoire de l'entreprise et rendre visibles
-les incohérences de pipeline (mauvais modèle, NaN/Inf, vecteurs non
-normalisés, producteur fautif).
+**The trust layer between your AI agents and your vector database.**
+Vector Router sits between embedding producers (LLM agents, RAG pipelines,
+indexing jobs) and your vector database. It validates, normalizes and
+routes every vector before it enters the database — preventing silent
+corruption of enterprise memory and surfacing pipeline inconsistencies
+(wrong model, NaN/Inf, unnormalized vectors, offending producer).
 
-Guide destiné à l'opérateur qui déploie le binaire en production. Temps de
-mise en route visé : **30 minutes** depuis le build jusqu'à la première
-requête routée.
+Operator-oriented guide for production deployment. Target time-to-first-
+request: **30 minutes** from build to the first routed request.
 
-Ce document assume que vous avez accès au repo (`git clone` + `make build` /
-`make docker`) ou à une image Docker pré-construite.
+This document assumes you have access to the repo (`git clone` + `make build`
+/ `make docker`) or a pre-built Docker image.
 
 ---
 
-## 1. Prérequis
+## 1. Prerequisites
 
-**Plateforme.** Linux x86-64, glibc ≥ 2.31 (Ubuntu 20.04+, Debian 11+, RHEL 9+).
-Le binaire est compilé pour `x86-64-v3` (Haswell 2013 et plus récent). Toute
-CPU serveur achetée après 2014 convient.
+**Platform.** Linux x86-64, glibc ≥ 2.31 (Ubuntu 20.04+, Debian 11+, RHEL 9+).
+The binary is compiled for `x86-64-v3` (Haswell 2013 and newer). Any server
+CPU bought after 2014 will work.
 
-**Backend vectoriel.** Un Qdrant joignable. Testé avec Qdrant 1.12+. L'URL
-va dans `config.toml` — aucun autre backend dans cette version.
+**Vector backend.** A reachable Qdrant instance. Tested against Qdrant 1.12+.
+The URL goes into `config.toml` — no other backend is supported in this
+version.
 
 **Ports.**
 
-| Port     | Rôle        | Qui y accède                        |
+| Port     | Role        | Who accesses it                     |
 |----------|-------------|--------------------------------------|
-| `50051`  | gRPC        | Vos producteurs d'embeddings         |
-| `9090`   | HTTP        | Prometheus, Grafana, sondes k8s      |
+| `50051`  | gRPC        | Your embedding producers             |
+| `9090`   | HTTP        | Prometheus, Grafana, k8s probes      |
 
-Les deux sont configurables. Le binaire ne sort pas en dehors de ces ports
-plus la connexion sortante vers Qdrant.
+Both are configurable. The binary makes no outbound traffic other than the
+Qdrant connection.
 
-**Permissions.** Aucun chemin disque writable n'est requis par défaut — le
-binaire fonctionne stateless tant que le backend vectoriel est joignable.
+**Permissions.** No writable disk path is required by default — the binary
+runs stateless as long as the vector backend is reachable.
 
 ---
 
 ## 2. Installation
 
 ```bash
-# 1. Build (à partir des sources)
+# 1. Build (from source)
 git clone https://github.com/Adelagric/vector-router.git
 cd vector-router
-make build               # produit target/release/vector-router
+make build               # produces target/release/vector-router
 
-# 2. Copie du binaire
+# 2. Install the binary
 sudo install -m 755 target/release/vector-router /usr/local/bin/
 
 # 3. Config
 sudo mkdir -p /etc/vector-router
 sudo cp config.example.toml /etc/vector-router/config.toml
 sudo chmod 640 /etc/vector-router/config.toml
-# Éditez config.toml — voir section 3.
+# Edit config.toml — see section 3.
 ```
 
-Pour un déploiement Docker, sauter cette section et aller directement à 4.b.
+For a Docker deployment, skip this section and jump straight to 4.b.
 
 ---
 
-## 3. Configuration minimale
+## 3. Minimal configuration
 
-Ouvrez `/etc/vector-router/config.toml`. Les **quatre** champs à vérifier en
-priorité :
+Open `/etc/vector-router/config.toml`. The **four** fields to verify first:
 
 ```toml
 [server]
@@ -74,12 +72,12 @@ grpc_bind = "0.0.0.0:50051"
 http_bind = "0.0.0.0:9090"
 
 [vdb]
-url = "http://votre-qdrant.interne:6334"
+url = "http://your-qdrant.internal:6334"
 timeout_ms = 500
 
 [admin]
-# À remplacer impérativement avant mise en prod. Idéalement injecté par
-# votre gestionnaire de secrets (Vault, AWS Secrets Manager, etc.).
+# Must be replaced before going to production. Ideally injected by your
+# secrets manager (Vault, AWS Secrets Manager, etc.).
 bearer_token = "CHANGE-ME"
 
 [models."openai-text-embedding-3-small"]
@@ -88,14 +86,13 @@ normalize = true
 vdb_namespace = "prod-openai-small"
 ```
 
-**Modèles.** Chaque modèle que vos producteurs utilisent doit être déclaré
-ici. Un modèle non déclaré = requête rejetée avec `UnknownModel`. C'est
-délibéré — pas de découverte automatique, pour que la base ne se remplisse
-jamais d'un modèle non validé par vous.
+**Models.** Every model that your producers use must be declared here. An
+undeclared model = request rejected with `UnknownModel`. This is deliberate
+— no auto-discovery, so the database can never be filled with a model you
+have not validated.
 
-**Variables d'environnement.** Toute valeur de la config peut être
-surchargée par une variable d'env préfixée `VR_`, avec `__` comme séparateur
-de sous-champ :
+**Environment variables.** Any config value can be overridden via a `VR_`-
+prefixed env var, with `__` as sub-field separator:
 
 ```bash
 VR_ADMIN__BEARER_TOKEN="$(vault kv get -field=token ...)" \
@@ -103,30 +100,21 @@ VR_VDB__URL="http://qdrant.prod:6334" \
 /usr/local/bin/vector-router
 ```
 
-Pratique pour ne pas committer de secrets dans le TOML.
+Useful for keeping secrets out of the committed TOML.
 
 ---
 
-## 4. Premier démarrage
+## 4. First boot
 
-### 4.a. Binaire natif
+### 4.a. Native binary
 
 ```bash
 VR_CONFIG_PATH=/etc/vector-router/config.toml /usr/local/bin/vector-router
 ```
 
-### 4.b. Image Docker (recommandé pour k8s / CI)
+### 4.b. Docker image (recommended for k8s / CI)
 
-Si vous avez reçu également l'archive `vector-router-X.Y.Z-docker.tar.gz` :
-
-```bash
-docker load -i vector-router-X.Y.Z-docker.tar.gz
-# => Loaded image: vector-router:X.Y.Z
-```
-
-**Piège à éviter** — pour les mounts : montez `config.toml` **au niveau
-fichier**, pas au niveau répertoire, pour éviter qu'un autre mount masque
-le fichier.
+If you have built the Docker image via `make docker`:
 
 ```bash
 docker run -d --name vector-router \
@@ -137,15 +125,17 @@ docker run -d --name vector-router \
   vector-router:X.Y.Z
 ```
 
-Pour que le container puisse joindre un Qdrant qui tourne sur l'hôte (dev
-local), remplacez `url = "http://qdrant:6334"` par
-`url = "http://host.docker.internal:6334"` dans `config.toml`.
+**Pitfall to avoid** — mount `config.toml` **as a file**, not as a
+directory, so that no later mount can mask the file.
 
-En Kubernetes, les ConfigMap et Secret se mappent naturellement : chacun
-produit un fichier individuel, donc le piège du directory-mount
-n'apparaît pas.
+To let the container reach a Qdrant running on the host (local dev),
+replace `url = "http://qdrant:6334"` with `url = "http://host.docker.internal:6334"`
+in `config.toml`.
 
-Sortie attendue sur stderr :
+In Kubernetes, ConfigMap and Secret map naturally: each produces an
+individual file, so the directory-mount pitfall does not show up.
+
+Expected stderr output:
 
 ```
 vector-router : chargement config depuis /etc/vector-router/config.toml
@@ -155,31 +145,31 @@ vector-router : serveurs démarrés (gRPC 0.0.0.0:50051, HTTP 0.0.0.0:9090)
 
 ---
 
-## 5. Vérification end-to-end
+## 5. End-to-end verification
 
-### 5.1 Sondes HTTP
+### 5.1 HTTP probes
 
 ```bash
 curl http://localhost:9090/health
 # => "ok"  (200)
 
 curl http://localhost:9090/ready
-# => "ready"  (200) si Qdrant joignable
-# => "vdb indisponible : ..." (503) sinon
+# => "ready"  (200) if Qdrant is reachable
+# => "vdb indisponible : ..." (503) otherwise
 ```
 
-### 5.2 Premier appel gRPC
+### 5.2 First gRPC call
 
-Installez `grpcurl` (`brew install grpcurl`, `apt install grpcurl`, ou
+Install `grpcurl` (`brew install grpcurl`, `apt install grpcurl`, or
 <https://github.com/fullstorydev/grpcurl/releases>).
 
-Encodage du vecteur : les octets `f32` little-endian doivent être encodés en
-base64 pour le champ `bytes`. Le vecteur 4-dim `[1.0, 0.0, 0.0, 0.0]` donne
+Vector encoding: `f32` little-endian bytes must be base64-encoded for the
+`bytes` protobuf field. The 4-dim vector `[1.0, 0.0, 0.0, 0.0]` becomes
 `AACAPwAAAAAAAAAAAAAAAA==`.
 
 ```bash
 grpcurl -plaintext \
-  -proto docs/router.proto \
+  -proto proto/vector_router/v1/router.proto \
   -d '{
         "model_id": "openai-text-embedding-3-small",
         "point_id": "hello-world",
@@ -191,7 +181,7 @@ grpcurl -plaintext \
   vector_router.v1.VectorRouter/Upsert
 ```
 
-Réponse attendue (timing indicatif) :
+Expected response (indicative timing):
 ```json
 {
   "pointId": "hello-world",
@@ -201,26 +191,26 @@ Réponse attendue (timing indicatif) :
 }
 ```
 
-### 5.3 Métriques Prometheus
+### 5.3 Prometheus metrics
 
 ```bash
 curl -s http://localhost:9090/metrics | grep requests_total
 ```
 
-Doit contenir au moins une ligne du type :
+Should contain at least one line of the form:
 ```
 requests_total{model_id="openai-text-embedding-3-small",op="upsert",status="ok",producer_id="install-test"} 1
 ```
 
-Si c'est vert, le pipeline est opérationnel.
+If this is green, the pipeline is operational.
 
 ---
 
-## 6. Exploitation en prod
+## 6. Running in production
 
 ### 6.1 systemd
 
-Fichier `/etc/systemd/system/vector-router.service` :
+File `/etc/systemd/system/vector-router.service`:
 
 ```ini
 [Unit]
@@ -240,7 +230,7 @@ RestartSec=5
 KillSignal=SIGTERM
 TimeoutStopSec=35
 
-# Durcissement
+# Hardening
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -251,8 +241,8 @@ ReadWritePaths=/var/lib/vector-router
 WantedBy=multi-user.target
 ```
 
-`secrets.env` (permissions 600) contient typiquement
-`VR_ADMIN__BEARER_TOKEN=...` et, si applicable, `VR_VDB__API_KEY=...`.
+`secrets.env` (mode 600) typically contains `VR_ADMIN__BEARER_TOKEN=...`
+and, if applicable, `VR_VDB__API_KEY=...`.
 
 ```bash
 sudo useradd --system --no-create-home vector-router
@@ -264,7 +254,7 @@ sudo journalctl -u vector-router -f
 
 ### 6.2 Kubernetes
 
-Exposez les sondes standard :
+Expose the standard probes:
 
 ```yaml
 livenessProbe:
@@ -275,47 +265,47 @@ readinessProbe:
   periodSeconds: 5
 ```
 
-`/ready` renvoie 503 si Qdrant devient injoignable — le load balancer
-retire alors le pod du pool automatiquement.
+`/ready` returns 503 if Qdrant becomes unreachable — the load balancer
+automatically removes the pod from rotation.
 
-### 6.3 Shutdown propre
+### 6.3 Graceful shutdown
 
-Le binaire gère SIGTERM. La séquence :
-1. Cesse d'accepter de nouvelles connexions gRPC.
-2. Draine les requêtes en cours (timeout 30 s).
-3. Arrêt propre.
+The binary handles SIGTERM. The sequence:
+1. Stops accepting new gRPC connections.
+2. Drains in-flight requests (30 s timeout).
+3. Clean exit.
 
-Ne l'interrompez jamais par `kill -9` en prod — les requêtes en vol
-perdent leur réponse.
+Never interrupt it via `kill -9` in production — in-flight requests lose
+their response.
 
 ---
 
-## 7. Observabilité
+## 7. Observability
 
-### 7.1 Dashboard Grafana
+### 7.1 Grafana dashboard
 
-Importez `docs/grafana-dashboard.json` dans Grafana 10+.
-Source Prometheus pointée sur `http://<host>:9090/metrics` (ou votre
-scrape job existant).
+Import `docs/grafana-dashboard.json` into Grafana 10+.
+Prometheus source pointed at `http://<host>:9090/metrics` (or your
+existing scrape job).
 
-Panneaux clés :
-- **Taux de requêtes RED** par modèle et par `producer_id`
-- **Taux d'erreurs** par status (unknown_model, invalid_dim, vdb_error, etc.)
-- **Latence p50/p95/p99** par modèle
-- **Saturation VDB** (`vdb_inflight`)
-- **Pool mémoire** (`pool_available`, `pool_exhausted_total`)
-- **Désalignement vecteurs** (`misaligned_copies_total`)
+Key panels:
+- **RED request rate** per model and per `producer_id`
+- **Error rate** by status (unknown_model, invalid_dim, vdb_error, etc.)
+- **p50/p95/p99 latency** per model
+- **VDB saturation** (`vdb_inflight`)
+- **Memory pool** (`pool_available`, `pool_exhausted_total`)
+- **Vector misalignment** (`misaligned_copies_total`)
 
-### 7.2 Journal de rejet
+### 7.2 Rejection journal
 
-Toute requête rejetée à la validation produit une ligne JSON sur **stderr**
-(distincte des métriques Prometheus, qui agrègent) :
+Every request rejected at validation produces a JSON line on **stderr**
+(separate from Prometheus metrics, which aggregate):
 
 ```json
 {"event":"rejection","op":"upsert","producer_id":"batch-nightly","model_id":"openai-small","status":"invalid_dim","reason":"dimension invalide : attendu 6144, reçu 4096"}
 ```
 
-Pour retrouver le producteur fautif quand une métrique Prometheus monte :
+To pinpoint the offending producer when a Prometheus metric rises:
 
 ```bash
 journalctl -u vector-router --since "10 min ago" \
@@ -324,64 +314,62 @@ journalctl -u vector-router --since "10 min ago" \
   | sort | uniq -c | sort -rn
 ```
 
-### 7.3 Qu'est-ce qui doit vous inquiéter ?
+### 7.3 What should worry you
 
-| Signal                              | Seuil typique | Action                        |
-|-------------------------------------|---------------|-------------------------------|
-| `misaligned_copies_total` / total   | > 1 %         | Producteur envoie des buffers mal alignés — investiguer côté client |
-| `pool_exhausted_total`              | > 0           | Sous-dimensionné — augmenter `pool.buffers_per_worker` |
-| Latence p99 `request_duration`      | > 1 ms        | Réseau Qdrant ou saturation VDB — vérifier `vdb_inflight` |
-| `requests_total{status="vdb_error"}`| toute valeur >0 soutenue | Qdrant instable ou timeout trop bas |
+| Signal                              | Typical threshold | Action                        |
+|-------------------------------------|-------------------|-------------------------------|
+| `misaligned_copies_total` / total   | > 1 %             | Producer is sending misaligned buffers — investigate client side |
+| `pool_exhausted_total`              | > 0               | Under-dimensioned — increase `pool.buffers_per_worker` |
+| `request_duration` p99              | > 1 ms            | Qdrant network or VDB saturation — check `vdb_inflight` |
+| `requests_total{status="vdb_error"}`| any sustained > 0 | Qdrant unstable or timeout too low |
 
 ---
 
-## 8. Dépannage
+## 8. Troubleshooting
 
-### « vector-router : chargement config depuis config.toml » puis crash
+### "vector-router : chargement config depuis config.toml" then crash
 
-Le binaire cherche `config.toml` dans le répertoire courant par défaut.
-Fixez `VR_CONFIG_PATH` ou lancez-le depuis le bon répertoire.
+The binary looks for `config.toml` in the current directory by default.
+Set `VR_CONFIG_PATH` or launch it from the right directory.
 
-### `/ready` renvoie 503
+### `/ready` returns 503
 
-Qdrant n'est pas joignable depuis le container / host. Vérifiez :
+Qdrant is not reachable from the container / host. Verify:
 
 ```bash
 curl -v http://<qdrant-host>:6334/readyz
 ```
 
-Si c'est un problème de latence, augmenter `vdb.timeout_ms` dans la
-config. Par défaut 500 ms — suffisant sur LAN, à relever pour du
-cross-region.
+If it's a latency issue, raise `vdb.timeout_ms` in the config. Default is
+500 ms — fine on LAN, raise it for cross-region.
 
-### Logs `pool_exhausted_total` qui grimpe
+### `pool_exhausted_total` climbing
 
-Le pool mémoire est dimensionné via `pool.buffers_per_worker` (défaut 2).
-Si votre charge envoie plus de 2N requêtes concurrentes en burst (N =
-nombre de workers tokio), allonger le pool. Le fallback est transparent
-(allocation ad-hoc), mais coûte plus cher.
+The memory pool is sized via `pool.buffers_per_worker` (default 2). If
+your load sends more than 2N concurrent requests in burst (N = number of
+tokio workers), grow the pool. The fallback is transparent (ad-hoc
+allocation) but more expensive.
 
-### Erreur `DeadlineExceeded` côté client gRPC
+### `DeadlineExceeded` error on the gRPC client
 
-Votre client a un timeout plus court que le temps de traitement en queue.
-Augmenter le timeout côté client, ou dimensionner plus grand
-`server.max_concurrent_requests`.
+Your client has a shorter timeout than the queue-processing time. Raise
+the client timeout, or grow `server.max_concurrent_requests`.
 
-### « modèle inconnu : xxx »
+### "modèle inconnu : xxx"
 
-Le modèle n'est pas déclaré dans la config. Ajoutez une section
-`[models."xxx"]` et redémarrez. Pas de découverte automatique — c'est
-volontaire, pour éviter qu'un producteur n'enregistre n'importe quoi.
+The model is not declared in the config. Add a `[models."xxx"]` section
+and restart. No auto-discovery — by design, to prevent any producer from
+registering arbitrary models.
 
 ---
 
 ## 9. Support
 
-Pour tout problème non couvert ici :
+For anything not covered above:
 
-- **Logs utiles** : `journalctl -u vector-router --since "1 hour ago"`
-- **État métriques** : `curl -s http://localhost:9090/metrics > /tmp/metrics.txt`
-- **Version** : `/usr/local/bin/vector-router --version` (si compilé
-  avec l'option) ou inspection du `sha256sum` du binaire
+- **Useful logs**: `journalctl -u vector-router --since "1 hour ago"`
+- **Metric snapshot**: `curl -s http://localhost:9090/metrics > /tmp/metrics.txt`
+- **Version**: `/usr/local/bin/vector-router --version` (if compiled with
+  the flag) or inspect the binary's `sha256sum`
 
-Contact : Adel Kaleche — <kaleche@gmail.com> — +33 7 80 76 06 71
+Contact: Adel Kaleche — <kaleche@gmail.com> — +33 7 80 76 06 71

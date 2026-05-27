@@ -1,23 +1,23 @@
-# Clients multi-langages
+# Multi-language clients
 
-Le service expose une API gRPC standard ([`router.proto`](../../proto/vector_router/v1/router.proto)) — n'importe quel langage avec un runtime gRPC peut s'y brancher. Deux clients de référence sont fournis ici, en Python et en TypeScript, pour montrer concrètement comment intégrer vector-router dans une stack existante.
+The service exposes a standard gRPC API ([`router.proto`](../../proto/vector_router/v1/router.proto)) — any language with a gRPC runtime can plug in. Two reference clients are provided here, in Python and TypeScript, to show concretely how to integrate vector-router into an existing stack.
 
-| Langage | Dossier | Runtime gRPC | Codegen |
+| Language | Directory | gRPC runtime | Codegen |
 |---|---|---|---|
-| Python 3.10+ | [`python/`](python/) | `grpcio` | runtime via `grpcio-tools` (pas de stubs versionnés) |
+| Python 3.10+ | [`python/`](python/) | `grpcio` | runtime via `grpcio-tools` (no versioned stubs) |
 | TypeScript / Node 22+ | [`typescript/`](typescript/) | `@grpc/grpc-js` | runtime via `@grpc/proto-loader` |
 
-Les deux clients exécutent la même séquence de démo contre un vector-router en écoute sur `localhost:50051` :
+Both clients run the same demo sequence against a vector-router listening on `localhost:50051`:
 
-1. `Upsert` d'un vecteur 1536-dim valide → succès, retour du namespace VDB et flag `was_normalized`.
-2. `Upsert` du même vecteur avec un `NaN` injecté → rejeté avec `INVALID_ARGUMENT` côté router, jamais écrit en base.
-3. `Search` avec le même pipeline de validation et de normalisation → garantie de cohérence des scores.
+1. `Upsert` of a valid 1536-dim vector → success, returns the VDB namespace and `was_normalized` flag.
+2. `Upsert` of the same vector with an injected `NaN` → rejected with `INVALID_ARGUMENT` by the router, never written to the database.
+3. `Search` using the same validation and normalization pipeline → guaranteed score coherence.
 
-Chaque requête porte un champ `producer_id` (`python-client`, `ts-client`) qui devient un label Prometheus côté router. Sur le dashboard Grafana, vous voyez immédiatement la répartition des appels par langage et la part de rejets par client.
+Each request carries a `producer_id` field (`python-client`, `ts-client`) that becomes a Prometheus label on the router side. On the Grafana dashboard you immediately see the split of calls by language and the share of rejects per client.
 
 ## Quickstart
 
-Stack minimale pour reproduire localement (Qdrant + vector-router en compose, voir [README principal](../../README.md#quickstart--vector-router--qdrant-en-5-minutes)) :
+Minimal stack to reproduce locally (Qdrant + vector-router via compose, see [main README](../../README.md#quickstart--vector-router--qdrant-in-5-minutes)):
 
 ### Python
 
@@ -35,9 +35,9 @@ npm install
 npm run demo
 ```
 
-## Pourquoi gRPC plutôt que REST
+## Why gRPC rather than REST
 
-- **Schéma fort** — le `.proto` est la source de vérité, codegen automatique dans tous les langages.
-- **Bytes natifs pour les vecteurs** — `bytes` protobuf transporte le `Float32Array` brut, pas du JSON base64 verbeux. Sur un vecteur 1536-dim, gain ~3× sur la taille du payload et zéro coût de parsing JSON.
-- **Streaming** — non utilisé en V1, mais ouvre la porte à un mode batch streaming sans rupture d'API.
-- **Compatible service mesh** — Istio, Linkerd, Envoy ont tous un support gRPC de premier ordre (mTLS, retry budget, load balancing par requête).
+- **Strong schema** — the `.proto` is the source of truth, automatic codegen in every language.
+- **Native bytes for vectors** — protobuf `bytes` carries the raw `Float32Array`, not verbose base64-encoded JSON. On a 1536-dim vector, ~3× saving on payload size and zero JSON parsing cost.
+- **Streaming** — not used in V1, but opens the door to a streaming batch mode with no breaking change to the API.
+- **Service mesh compatible** — Istio, Linkerd and Envoy all have first-class gRPC support (mTLS, retry budget, per-request load balancing).
