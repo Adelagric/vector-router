@@ -30,8 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = std::env::var("VR_CONFIG_PATH").unwrap_or_else(|_| "config.toml".to_string());
 
     eprintln!("vector-router: loading config from {config_path}");
-    let config =
-        Config::load(&config_path).map_err(|e| format!("failed to load config: {e}"))?;
+    let config = Config::load(&config_path).map_err(|e| format!("failed to load config: {e}"))?;
 
     let runtime = build_runtime(&config)?;
     runtime.block_on(async_main(config))

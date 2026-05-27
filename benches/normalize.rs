@@ -61,10 +61,7 @@ fn bench_normalize_in_place(c: &mut Criterion) {
     // Sanity: the function must actually mutate the vector.
     let mut probe = template.clone();
     let changed = normalize_in_place(&mut probe, n2);
-    assert!(
-        changed,
-        "sanity: a non-unit vector must be normalized"
-    );
+    assert!(changed, "sanity: a non-unit vector must be normalized");
     let final_n2 = l2_norm_squared(&probe).unwrap();
     assert!(
         (final_n2 - 1.0).abs() < 1e-4,

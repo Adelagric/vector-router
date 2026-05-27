@@ -366,11 +366,7 @@ async fn multi_model_concurrent_upserts() {
         h.await.expect("join").expect("upsert OK");
     }
 
-    assert_eq!(
-        mock.upsert_count(),
-        90,
-        "all 90 upserts must have arrived"
-    );
+    assert_eq!(mock.upsert_count(), 90, "all 90 upserts must have arrived");
 
     // Check the per-namespace distribution.
     let calls = mock.upserts.lock().expect("mutex");

@@ -200,9 +200,7 @@ fn status_from_error(err: Error) -> Status {
         Error::InvalidDim { expected, got } => Status::invalid_argument(format!(
             "invalid dimension: expected {expected} bytes, got {got}"
         )),
-        Error::InvalidNumeric => {
-            Status::invalid_argument("vector contains NaN or Inf".to_string())
-        }
+        Error::InvalidNumeric => Status::invalid_argument("vector contains NaN or Inf".to_string()),
         Error::Vdb(msg) => Status::unavailable(format!("vector database: {msg}")),
         Error::Validation(msg) => Status::invalid_argument(msg),
         Error::Config(e) => Status::internal(format!("config: {e}")),

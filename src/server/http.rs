@@ -172,19 +172,13 @@ mod tests {
         // Verify the page structure: the three sections are all present.
         assert!(body.contains("Vector Router"), "title missing");
         assert!(body.contains("Service status"), "live section missing");
-        assert!(
-            body.contains("Code quality"),
-            "evidence section missing"
-        );
+        assert!(body.contains("Code quality"), "evidence section missing");
         assert!(
             body.contains("Measured performance"),
             "bench section missing"
         );
         // The JS must point to /metrics for live refresh.
-        assert!(
-            body.contains("fetch(\"/metrics\""),
-            "fetch metrics missing"
-        );
+        assert!(body.contains("fetch(\"/metrics\""), "fetch metrics missing");
     }
 
     #[tokio::test(flavor = "multi_thread")]
