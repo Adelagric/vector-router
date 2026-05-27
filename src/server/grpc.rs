@@ -195,20 +195,20 @@ pub fn build_grpc_server(
 fn status_from_error(err: Error) -> Status {
     match err {
         Error::UnknownModel { ref model_id } => {
-            Status::not_found(format!("modèle inconnu : {model_id}"))
+            Status::not_found(format!("unknown model: {model_id}"))
         }
         Error::InvalidDim { expected, got } => Status::invalid_argument(format!(
-            "dimension invalide : attendu {expected} octets, reçu {got}"
+            "invalid dimension: expected {expected} bytes, got {got}"
         )),
         Error::InvalidNumeric => {
-            Status::invalid_argument("vecteur contient NaN ou Inf".to_string())
+            Status::invalid_argument("vector contains NaN or Inf".to_string())
         }
-        Error::Vdb(msg) => Status::unavailable(format!("base vectorielle : {msg}")),
+        Error::Vdb(msg) => Status::unavailable(format!("vector database: {msg}")),
         Error::Validation(msg) => Status::invalid_argument(msg),
-        Error::Config(e) => Status::internal(format!("config : {e}")),
-        Error::Io(e) => Status::internal(format!("io : {e}")),
-        Error::Telemetry(msg) => Status::internal(format!("télémétrie : {msg}")),
-        Error::Service(msg) => Status::internal(format!("service : {msg}")),
+        Error::Config(e) => Status::internal(format!("config: {e}")),
+        Error::Io(e) => Status::internal(format!("io: {e}")),
+        Error::Telemetry(msg) => Status::internal(format!("telemetry: {msg}")),
+        Error::Service(msg) => Status::internal(format!("service: {msg}")),
     }
 }
 
@@ -545,7 +545,7 @@ mod tests {
         let calls = mock.upserts.lock().expect("mutex");
         assert_eq!(calls.len(), 1);
         let v = &calls[0].vector;
-        assert!((v[0] - 0.6).abs() < 1e-5, "normalisé attendu, eu {v:?}");
+        assert!((v[0] - 0.6).abs() < 1e-5, "expected normalized, got {v:?}");
         assert!((v[1] - 0.8).abs() < 1e-5);
     }
 
@@ -618,7 +618,7 @@ mod tests {
         // Just check that a retry occurred (duration > 0).
         assert!(
             elapsed >= Duration::from_millis(2),
-            "retry attendu, elapsed {elapsed:?}"
+            "expected retry, elapsed {elapsed:?}"
         );
     }
 
@@ -653,7 +653,7 @@ mod tests {
         let norm_sq: f32 = v.iter().map(|x| x * x).sum();
         assert!(
             (norm_sq - 1.0).abs() < 1e-5,
-            "vecteur requête devrait être normalisé, norme²={norm_sq}"
+            "query vector should be normalized, norm_sq={norm_sq}"
         );
     }
 
@@ -719,7 +719,7 @@ mod tests {
         assert_eq!(
             pool.exhausted_count(),
             0,
-            "le pool devrait être libéré entre les requêtes"
+            "pool should be released between requests"
         );
     }
 }

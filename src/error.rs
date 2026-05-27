@@ -10,31 +10,31 @@ use thiserror::Error;
 /// bloat every `Result<_, Error>` on the hot path (clippy::result_large_err).
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("modèle inconnu : {model_id}")]
+    #[error("unknown model: {model_id}")]
     UnknownModel { model_id: String },
 
-    #[error("dimension invalide : attendu {expected}, reçu {got}")]
+    #[error("invalid dimension: expected {expected}, got {got}")]
     InvalidDim { expected: usize, got: usize },
 
-    #[error("vecteur contient une valeur non finie (NaN ou Inf)")]
+    #[error("vector contains a non-finite value (NaN or Inf)")]
     InvalidNumeric,
 
-    #[error("erreur base vectorielle : {0}")]
+    #[error("vector database error: {0}")]
     Vdb(String),
 
-    #[error("erreur de configuration : {0}")]
+    #[error("configuration error: {0}")]
     Config(Box<figment::Error>),
 
-    #[error("erreur I/O : {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("validation de configuration : {0}")]
+    #[error("configuration validation: {0}")]
     Validation(String),
 
-    #[error("erreur télémétrie : {0}")]
+    #[error("telemetry error: {0}")]
     Telemetry(String),
 
-    #[error("erreur service : {0}")]
+    #[error("service error: {0}")]
     Service(String),
 }
 

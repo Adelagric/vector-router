@@ -137,7 +137,7 @@ mod tests {
         let raw: &[u8] = bytemuck::cast_slice(&input);
         let mut scratch = AlignedBuffer::new(64);
 
-        let view = validate_and_align(raw, 4, &mut scratch).expect("alignement OK");
+        let view = validate_and_align(raw, 4, &mut scratch).expect("alignment OK");
         assert_eq!(&*view, &[1.0, 2.0, 3.0, 4.0]);
 
         // View pointer == input bytes pointer → zero-copy.
@@ -145,7 +145,7 @@ mod tests {
         let raw_ptr = raw.as_ptr() as usize;
         assert_eq!(
             view_ptr, raw_ptr,
-            "slice retourné devrait pointer dans raw (zero-copy)"
+            "returned slice should point into raw (zero-copy)"
         );
     }
 
@@ -161,10 +161,10 @@ mod tests {
         shifted[1..1 + raw_bytes.len()].copy_from_slice(&raw_bytes);
         let misaligned: &[u8] = &shifted[1..17];
         assert_eq!(misaligned.len(), 16);
-        assert_ne!(misaligned.as_ptr() as usize % 4, 0, "désaligné attendu");
+        assert_ne!(misaligned.as_ptr() as usize % 4, 0, "expected misaligned");
 
         let mut scratch = AlignedBuffer::new(64);
-        let view = validate_and_align(misaligned, 4, &mut scratch).expect("copie OK");
+        let view = validate_and_align(misaligned, 4, &mut scratch).expect("copy OK");
 
         assert_eq!(&*view, &[1.0, 2.0, 3.0, 4.0]);
         // The view pointer is NOT inside the `misaligned` range.
@@ -172,7 +172,7 @@ mod tests {
         let mp = misaligned.as_ptr() as usize;
         assert!(
             vp < mp || vp >= mp + misaligned.len(),
-            "la vue devrait pointer dans scratch, pas dans la source"
+            "view should point into scratch, not into the source"
         );
     }
 
@@ -186,7 +186,7 @@ mod tests {
                 assert_eq!(expected, 16);
                 assert_eq!(got, 15);
             }
-            other => panic!("attendu InvalidDim, eu {other:?}"),
+            other => panic!("expected InvalidDim, got {other:?}"),
         }
     }
 
@@ -253,7 +253,7 @@ mod tests {
         let final_n2 = l2_norm_squared(&v).unwrap();
         assert!(
             (final_n2 - 1.0).abs() < 1e-6,
-            "norme après normalisation doit être ≈ 1, eu {final_n2}"
+            "norm after normalization must be ~ 1, got {final_n2}"
         );
     }
 

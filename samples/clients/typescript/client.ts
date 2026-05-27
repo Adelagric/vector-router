@@ -154,12 +154,12 @@ async function main() {
       dim: bad.length,
       producer_id: producer,
     });
-    console.log("[KO] Upsert NaN aurait dû être rejeté");
+    console.log("[KO] Upsert NaN should have been rejected");
     process.exit(1);
   } catch (e) {
     const err = e as ServiceError;
     if (err.code !== status.INVALID_ARGUMENT) throw e;
-    console.log(`[OK] NaN rejeté côté router : ${err.details}`);
+    console.log(`[OK] NaN rejected by router: ${err.details}`);
   }
 
   // 3. Search through the same validation pipeline

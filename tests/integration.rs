@@ -192,7 +192,7 @@ async fn make_client(addr: std::net::SocketAddr) -> VectorRouterClient<tonic::tr
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    panic!("client n'a pas réussi à se connecter à {addr}");
+    panic!("client failed to connect to {addr}");
 }
 
 fn upsert_req(model_id: &str, point_id: &str) -> UpsertRequest {
@@ -238,7 +238,7 @@ async fn graceful_shutdown_preserves_in_flight_request() {
     let resp = req_task
         .await
         .expect("join")
-        .expect("upsert répond Ok malgré shutdown");
+        .expect("upsert responds Ok despite shutdown");
     assert_eq!(resp.into_inner().vdb_namespace, "ns-m1");
     assert_eq!(mock.upsert_count(), 1);
 }
@@ -315,7 +315,7 @@ async fn oversized_payload_rejected_before_handler() {
     let err = client
         .upsert(req)
         .await
-        .expect_err("payload trop gros doit être rejeté");
+        .expect_err("oversized payload must be rejected");
     // The exact code varies with the tonic mapping (ResourceExhausted,
     // OutOfRange, or Unknown on the transport side). Just verify that
     // it's an error AND that the handler was NOT invoked.
@@ -328,13 +328,13 @@ async fn oversized_payload_rejected_before_handler() {
                 | tonic::Code::Unknown
                 | tonic::Code::Internal
         ),
-        "code inattendu : {:?}",
+        "unexpected code: {:?}",
         err.code()
     );
     assert_eq!(
         mock.upsert_count(),
         0,
-        "le handler ne devait pas être atteint"
+        "handler should not have been reached"
     );
 
     let _ = server.shutdown_tx.send(());
@@ -369,7 +369,7 @@ async fn multi_model_concurrent_upserts() {
     assert_eq!(
         mock.upsert_count(),
         90,
-        "les 90 upserts doivent être arrivés"
+        "all 90 upserts must have arrived"
     );
 
     // Check the per-namespace distribution.

@@ -55,7 +55,7 @@ impl AlignedBuffer {
     pub fn copy_from_slice(&mut self, src: &[u8]) -> Result<(), Error> {
         if src.len() > self.capacity_bytes() {
             return Err(Error::Validation(format!(
-                "payload ({} octets) dépasse la capacité du buffer ({} octets)",
+                "payload ({} bytes) exceeds buffer capacity ({} bytes)",
                 src.len(),
                 self.capacity_bytes(),
             )));
@@ -74,7 +74,7 @@ impl AlignedBuffer {
         let all_bytes = bytemuck::cast_slice::<u32, u8>(&self.storage);
         let used = &all_bytes[..self.len];
         bytemuck::try_cast_slice::<u8, f32>(used)
-            .map_err(|e| Error::Validation(format!("buffer non convertible en &[f32] : {e:?}")))
+            .map_err(|e| Error::Validation(format!("buffer not convertible to &[f32]: {e:?}")))
     }
 
     /// Resets the useful length to zero. Memory is not freed.
@@ -192,7 +192,7 @@ mod tests {
     fn buffer_is_4_byte_aligned() {
         let buf = AlignedBuffer::new(16);
         let ptr = buf.storage.as_ptr() as usize;
-        assert_eq!(ptr % 4, 0, "pointeur de stockage non aligné sur 4 : {ptr}");
+        assert_eq!(ptr % 4, 0, "storage pointer not 4-aligned: {ptr}");
     }
 
     #[test]

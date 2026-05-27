@@ -54,7 +54,7 @@ def ensure_stubs() -> None:
     ]
     rc = protoc.main(args)
     if rc != 0:
-        raise RuntimeError(f"protoc a échoué (code {rc})")
+        raise RuntimeError(f"protoc failed (exit {rc})")
 
 
 # ---------------------------------------------------------------------------
@@ -123,11 +123,11 @@ def main() -> int:
         )
         try:
             stub.Upsert(req_nan, timeout=2.0)
-            print("[KO] Upsert NaN aurait dû être rejeté")
+            print("[KO] Upsert NaN should have been rejected")
             return 1
         except grpc.RpcError as e:
             assert e.code() == grpc.StatusCode.INVALID_ARGUMENT, e
-            print(f"[OK] NaN rejeté côté router : {e.details()}")
+            print(f"[OK] NaN rejected by router: {e.details()}")
 
         # 3. Search through the same validation pipeline
         req_search = router_pb2.SearchRequest(

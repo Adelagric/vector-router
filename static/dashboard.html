@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Vector Router — Tableau de bord</title>
+<title>Vector Router — Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
@@ -136,96 +136,96 @@
 
 <header>
   <h1>Vector Router</h1>
-  <div class="sub">Tableau de bord du service — mis à jour toutes les 5 secondes</div>
+  <div class="sub">Service dashboard — refreshed every 5 seconds</div>
 </header>
 
 <main>
 
-  <!-- Section 1 : État temps réel -->
+  <!-- Section 1: real-time status -->
   <div class="card">
-    <h2>État du service <span class="badge live">live</span></h2>
+    <h2>Service status <span class="badge live">live</span></h2>
     <div id="status-row" class="status-row">
       <div class="status-dot"></div>
-      <div>Service opérationnel</div>
+      <div>Service operational</div>
     </div>
     <div class="metric">
-      <span class="label">Modèles enregistrés</span>
+      <span class="label">Registered models</span>
       <span class="value" id="registered_models">—</span>
     </div>
     <div class="metric">
-      <span class="label">Buffers disponibles</span>
+      <span class="label">Available buffers</span>
       <span class="value" id="pool_available">—</span>
     </div>
     <div class="metric">
-      <span class="label">Requêtes VDB en vol</span>
+      <span class="label">VDB requests in flight</span>
       <span class="value" id="vdb_inflight">—</span>
     </div>
     <div class="metric">
-      <span class="label">Requêtes traitées (total)</span>
+      <span class="label">Requests processed (total)</span>
       <span class="value" id="requests_total">—</span>
     </div>
     <div class="metric">
-      <span class="label">Taux d'erreur</span>
+      <span class="label">Error rate</span>
       <span class="value" id="error_rate">—</span>
     </div>
     <div class="metric">
-      <span class="label">Copies par désalignement</span>
+      <span class="label">Misalignment copies</span>
       <span class="value" id="misaligned">—</span>
     </div>
     <div class="metric">
-      <span class="label">Fallbacks pool (épuisement)</span>
+      <span class="label">Pool fallbacks (exhaustion)</span>
       <span class="value" id="pool_exhausted">—</span>
     </div>
-    <p class="note">Source : <code>/metrics</code> (format Prometheus).</p>
+    <p class="note">Source: <code>/metrics</code> (Prometheus format).</p>
   </div>
 
-  <!-- Section 2 : Qualité du code -->
+  <!-- Section 2: code quality -->
   <div class="card">
-    <h2>Qualité du code <span class="badge static">build</span></h2>
+    <h2>Code quality <span class="badge static">build</span></h2>
     <div class="metric">
-      <span class="label">Tests unitaires</span>
-      <span class="value ok">87 ✓</span>
+      <span class="label">Unit tests</span>
+      <span class="value ok">87 OK</span>
     </div>
     <div class="metric">
-      <span class="label">Tests d'intégration</span>
-      <span class="value ok">8 ✓</span>
+      <span class="label">Integration tests</span>
+      <span class="value ok">8 OK</span>
     </div>
     <div class="metric">
-      <span class="label">Test non-régression lifetimes</span>
-      <span class="value ok">1 ✓</span>
+      <span class="label">Lifetime non-regression test</span>
+      <span class="value ok">1 OK</span>
     </div>
     <div class="metric">
       <span class="label">miri (math + pool + license)</span>
-      <span class="value ok">aucun UB</span>
+      <span class="value ok">no UB</span>
     </div>
     <div class="metric">
-      <span class="label">loom (pattern concurrence)</span>
-      <span class="value ok">validé</span>
+      <span class="label">loom (concurrency pattern)</span>
+      <span class="value ok">validated</span>
     </div>
     <div class="metric">
       <span class="label">clippy strict <code>-D warnings</code></span>
-      <span class="value ok">passe</span>
+      <span class="value ok">passes</span>
     </div>
     <div class="metric">
-      <span class="label">Blocs <code>unsafe</code></span>
+      <span class="label"><code>unsafe</code> blocks</span>
       <span class="value ok">0</span>
     </div>
     <div class="metric">
-      <span class="label"><code>unwrap</code> hors zones autorisées</span>
+      <span class="label"><code>unwrap</code> outside allowed zones</span>
       <span class="value ok">0</span>
     </div>
-    <p class="note">Vérifié à la dernière compilation. Commandes dans <code>HANDOVER.md</code>.</p>
+    <p class="note">Checked at last build. Commands in <code>HANDOVER.md</code>.</p>
   </div>
 
-  <!-- Section 3 : Performance mesurée -->
+  <!-- Section 3: measured performance -->
   <div class="card">
-    <h2>Performance mesurée <span class="badge static">bench</span></h2>
+    <h2>Measured performance <span class="badge static">bench</span></h2>
     <div class="metric">
-      <span class="label"><code>validate_and_align</code> (aligné)</span>
+      <span class="label"><code>validate_and_align</code> (aligned)</span>
       <span class="value">14 ns</span>
     </div>
     <div class="metric">
-      <span class="label"><code>validate_and_align</code> (désaligné, copie)</span>
+      <span class="label"><code>validate_and_align</code> (misaligned, copy)</span>
       <span class="value">207 ns</span>
     </div>
     <div class="metric">
@@ -237,36 +237,36 @@
       <span class="value">710 ns</span>
     </div>
     <div class="metric">
-      <span class="label">Budget chemin chaud (1 requête)</span>
-      <span class="value">~1,4 µs</span>
+      <span class="label">Hot path budget (1 request)</span>
+      <span class="value">~1.4 us</span>
     </div>
     <div class="metric">
-      <span class="label">Ratio au budget 50 µs</span>
+      <span class="label">Ratio to 50 us budget</span>
       <span class="value ok">~3 %</span>
     </div>
     <p class="note">
-      Détails reproductibles dans <code>BENCHES.md</code>.
+      Reproducible details in <code>BENCHES.md</code>.
     </p>
   </div>
 
 </main>
 
 <footer>
-  Vector Router · Tableau de bord local pour démonstration ·
-  Observabilité production via Grafana
+  Vector Router · Local dashboard for demonstration ·
+  Production observability via Grafana
   (<code>docs/grafana-dashboard.json</code>).
 </footer>
 
-<div class="last-update" id="last-update">chargement…</div>
+<div class="last-update" id="last-update">loading...</div>
 
 <script>
-// --- Parsing Prometheus minimal -------------------------------------------
-// On extrait les valeurs des métriques qu'on affiche. Pas de dépendance externe.
+// --- Minimal Prometheus parsing -------------------------------------------
+// Extract values for the metrics we display. No external dependency.
 function parsePrometheus(text) {
   const metrics = {};
   for (const line of text.split("\n")) {
     if (line.startsWith("#") || !line.trim()) continue;
-    // exemple: requests_total{model_id="m1",op="upsert",status="ok"} 42
+    // example: requests_total{model_id="m1",op="upsert",status="ok"} 42
     const match = line.match(/^(\w+)(\{[^}]*\})?\s+([0-9.eE+-]+)/);
     if (!match) continue;
     const [, name, labels, valueStr] = match;
@@ -284,11 +284,11 @@ function sum(metric) {
 
 function gauge(metric) {
   if (!metric || metric.length === 0) return null;
-  // pour une gauge on prend la dernière valeur (ou la première, peu importe — une seule série)
+  // for a gauge we take the last value (or the first, it doesn't matter — a single series)
   return metric[0].value;
 }
 
-// --- Rendu ----------------------------------------------------------------
+// --- Render ----------------------------------------------------------------
 function render(metrics) {
   const setText = (id, value) => {
     const el = document.getElementById(id);
@@ -300,9 +300,9 @@ function render(metrics) {
   setText("vdb_inflight", gauge(metrics["vdb_inflight"]) ?? "—");
 
   const totalRequests = sum(metrics["requests_total"]);
-  setText("requests_total", totalRequests.toLocaleString("fr-FR"));
+  setText("requests_total", totalRequests.toLocaleString("en-US"));
 
-  // taux d'erreur = (total - ok) / total
+  // error rate = (total - ok) / total
   const okRequests = (metrics["requests_total"] || [])
     .filter(s => /status="ok"/.test(s.labels))
     .reduce((a, s) => a + s.value, 0);
@@ -313,20 +313,20 @@ function render(metrics) {
     setText("error_rate", "0 %");
   }
 
-  setText("misaligned", sum(metrics["misaligned_copies_total"]).toLocaleString("fr-FR"));
-  setText("pool_exhausted", sum(metrics["pool_exhausted_total"]).toLocaleString("fr-FR"));
+  setText("misaligned", sum(metrics["misaligned_copies_total"]).toLocaleString("en-US"));
+  setText("pool_exhausted", sum(metrics["pool_exhausted_total"]).toLocaleString("en-US"));
 }
 
 function setDown(reason) {
   const row = document.getElementById("status-row");
   row.className = "status-row err";
-  row.innerHTML = `<div class="status-dot err"></div><div>Service injoignable — ${reason}</div>`;
+  row.innerHTML = `<div class="status-dot err"></div><div>Service unreachable — ${reason}</div>`;
 }
 
 function setUp() {
   const row = document.getElementById("status-row");
   row.className = "status-row";
-  row.innerHTML = `<div class="status-dot"></div><div>Service opérationnel</div>`;
+  row.innerHTML = `<div class="status-dot"></div><div>Service operational</div>`;
 }
 
 async function refresh() {
@@ -341,7 +341,7 @@ async function refresh() {
     setDown(e.message);
   } finally {
     document.getElementById("last-update").textContent =
-      "màj " + new Date().toLocaleTimeString("fr-FR");
+      "updated " + new Date().toLocaleTimeString("en-US");
   }
 }
 

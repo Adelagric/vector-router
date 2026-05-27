@@ -2,7 +2,7 @@
   "name": "vector-router-ts-client",
   "version": "0.1.0",
   "private": true,
-  "description": "Client gRPC TypeScript pour vector-router. Démonstration multi-langages.",
+  "description": "TypeScript gRPC client for vector-router. Multi-language demo.",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {

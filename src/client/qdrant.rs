@@ -280,7 +280,7 @@ mod tests {
         let p = point_id_from_string("42".to_string());
         match p.point_id_options {
             Some(PointIdOptions::Num(n)) => assert_eq!(n, 42),
-            other => panic!("attendu Num(42), eu {other:?}"),
+            other => panic!("expected Num(42), got {other:?}"),
         }
     }
 
@@ -290,7 +290,7 @@ mod tests {
         let p = point_id_from_string(uuid.clone());
         match p.point_id_options {
             Some(PointIdOptions::Uuid(s)) => assert_eq!(s, uuid),
-            other => panic!("attendu Uuid, eu {other:?}"),
+            other => panic!("expected Uuid, got {other:?}"),
         }
     }
 
@@ -302,7 +302,7 @@ mod tests {
         let p = point_id_from_string("doc-bench".to_string());
         match p.point_id_options {
             Some(PointIdOptions::Uuid(s)) => assert_eq!(s, "doc-bench"),
-            other => panic!("attendu Uuid('doc-bench'), eu {other:?}"),
+            other => panic!("expected Uuid('doc-bench'), got {other:?}"),
         }
     }
 
@@ -317,6 +317,6 @@ mod tests {
         };
         // The call will fail (timeout), but inflight must return to 0.
         let _ = c.upsert(params).await;
-        assert_eq!(c.inflight(), 0, "inflight doit revenir à 0 après erreur");
+        assert_eq!(c.inflight(), 0, "inflight must return to 0 after error");
     }
 }

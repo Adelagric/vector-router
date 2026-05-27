@@ -54,7 +54,7 @@ impl ServiceHandles {
         match joined {
             Ok(()) => Ok(()),
             Err(_) => Err(Error::Service(format!(
-                "drain non complété dans {timeout:?}"
+                "drain not completed within {timeout:?}"
             ))),
         }
     }
@@ -233,7 +233,7 @@ mod tests {
         handles
             .drain(Duration::from_secs(5))
             .await
-            .expect("drain dans la fenêtre");
+            .expect("drain within window");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -261,7 +261,7 @@ mod tests {
         // updater's tick (5s). If > 1s, the select! is not interrupting.
         assert!(
             elapsed < Duration::from_secs(1),
-            "drain aurait dû être immédiat, eu {elapsed:?}"
+            "drain should have been immediate, got {elapsed:?}"
         );
     }
 
@@ -285,7 +285,7 @@ mod tests {
         let err = handles
             .drain(Duration::from_millis(200))
             .await
-            .expect_err("drain sans signal doit timeout");
+            .expect_err("drain without signal must time out");
         assert!(matches!(err, Error::Service(_)));
 
         // Cleanup: send shutdown now so background tasks can release and

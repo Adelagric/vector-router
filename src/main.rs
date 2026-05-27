@@ -29,9 +29,9 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = std::env::var("VR_CONFIG_PATH").unwrap_or_else(|_| "config.toml".to_string());
 
-    eprintln!("vector-router : chargement config depuis {config_path}");
+    eprintln!("vector-router: loading config from {config_path}");
     let config =
-        Config::load(&config_path).map_err(|e| format!("échec chargement config : {e}"))?;
+        Config::load(&config_path).map_err(|e| format!("failed to load config: {e}"))?;
 
     let runtime = build_runtime(&config)?;
     runtime.block_on(async_main(config))
@@ -49,22 +49,22 @@ fn build_runtime(config: &Config) -> std::io::Result<tokio::runtime::Runtime> {
 async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // Fail-fast: without a Prometheus recorder, refuse to start.
     let metrics_handle = init_metrics()?;
-    eprintln!("vector-router : recorder Prometheus installé");
+    eprintln!("vector-router: Prometheus recorder installed");
 
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let handles = start_service(&config, metrics_handle, shutdown_tx.clone()).await?;
     eprintln!(
-        "vector-router : serveurs démarrés (gRPC {}, HTTP {})",
+        "vector-router: servers started (gRPC {}, HTTP {})",
         config.server.grpc_bind, config.server.http_bind
     );
 
     wait_for_shutdown_signal().await;
-    eprintln!("vector-router : signal reçu, drain en cours (timeout {DRAIN_TIMEOUT:?})");
+    eprintln!("vector-router: signal received, drain in progress (timeout {DRAIN_TIMEOUT:?})");
 
     // Propagation: every subscriber sees `send(())`.
     let _ = shutdown_tx.send(());
     handles.drain(DRAIN_TIMEOUT).await?;
-    eprintln!("vector-router : drain terminé, arrêt propre");
+    eprintln!("vector-router: drain complete, clean shutdown");
     Ok(())
 }
 
@@ -72,7 +72,7 @@ async fn wait_for_shutdown_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
-        let mut sigterm = signal(SignalKind::terminate()).expect("installer le handler SIGTERM");
+        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
         tokio::select! {
             _ = sigterm.recv() => {},
             _ = tokio::signal::ctrl_c() => {},

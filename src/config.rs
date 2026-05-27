@@ -155,31 +155,31 @@ impl Config {
     /// Post-parsing checks: dimensions, tokens, non-empty URLs.
     fn validate(&self) -> Result<(), Error> {
         if self.admin.bearer_token.is_empty() {
-            return Err(Error::Validation("admin.bearer_token vide".into()));
+            return Err(Error::Validation("admin.bearer_token is empty".into()));
         }
         if self.vdb.url.is_empty() {
-            return Err(Error::Validation("vdb.url vide".into()));
+            return Err(Error::Validation("vdb.url is empty".into()));
         }
         if self.pool.buffers_per_worker == 0 {
             return Err(Error::Validation(
-                "pool.buffers_per_worker doit être ≥ 1".into(),
+                "pool.buffers_per_worker must be >= 1".into(),
             ));
         }
         if self.vdb.max_retries == 0 {
             return Err(Error::Validation(
-                "vdb.max_retries doit être ≥ 1 (1 = pas de retry)".into(),
+                "vdb.max_retries must be >= 1 (1 = no retry)".into(),
             ));
         }
         for (name, spec) in &self.models {
             if name.is_empty() {
-                return Err(Error::Validation("nom de modèle vide".into()));
+                return Err(Error::Validation("empty model name".into()));
             }
             if spec.dim == 0 {
-                return Err(Error::Validation(format!("modèle '{name}' : dim = 0")));
+                return Err(Error::Validation(format!("model '{name}': dim is 0")));
             }
             if spec.vdb_namespace.is_empty() {
                 return Err(Error::Validation(format!(
-                    "modèle '{name}' : vdb_namespace vide"
+                    "model '{name}': vdb_namespace is empty"
                 )));
             }
         }
@@ -214,7 +214,7 @@ buffers_per_worker = 2
 
     #[test]
     fn parses_minimal_valid_config() {
-        let cfg = load_str(VALID_MINIMAL).expect("config minimale valide");
+        let cfg = load_str(VALID_MINIMAL).expect("minimal config valid");
         assert_eq!(cfg.server.grpc_bind.port(), 50051);
         assert_eq!(cfg.admin.bearer_token, "secret");
         assert_eq!(cfg.vdb.url, "http://qdrant:6334");
@@ -240,12 +240,12 @@ normalize = false
 vdb_namespace = "prod-cohere-en"
 "#
         );
-        let cfg = load_str(&toml).expect("deux modèles valides");
+        let cfg = load_str(&toml).expect("two valid models");
         assert_eq!(cfg.models.len(), 2);
         let spec = cfg
             .models
             .get("openai-text-embedding-3-small")
-            .expect("openai présent");
+            .expect("openai present");
         assert_eq!(spec.dim, 1536);
         assert!(spec.normalize);
     }
@@ -264,31 +264,31 @@ url = "http://qdrant:6334"
 [pool]
 buffers_per_worker = 2
 "#;
-        let err = load_str(toml).expect_err("admin manquant");
+        let err = load_str(toml).expect_err("admin missing");
         assert!(
             matches!(err, Error::Config(_)),
-            "attendu Config, eu {err:?}"
+            "expected Config, got {err:?}"
         );
     }
 
     #[test]
     fn rejects_empty_bearer_token() {
         let toml = VALID_MINIMAL.replace("secret", "");
-        let err = load_str(&toml).expect_err("token vide");
+        let err = load_str(&toml).expect_err("empty token");
         assert!(matches!(err, Error::Validation(msg) if msg.contains("bearer_token")));
     }
 
     #[test]
     fn rejects_empty_vdb_url() {
         let toml = VALID_MINIMAL.replace("http://qdrant:6334", "");
-        let err = load_str(&toml).expect_err("vdb.url vide");
+        let err = load_str(&toml).expect_err("empty vdb.url");
         assert!(matches!(err, Error::Validation(msg) if msg.contains("vdb.url")));
     }
 
     #[test]
     fn rejects_zero_buffers_per_worker() {
         let toml = VALID_MINIMAL.replace("buffers_per_worker = 2", "buffers_per_worker = 0");
-        let err = load_str(&toml).expect_err("pool à 0");
+        let err = load_str(&toml).expect_err("pool at 0");
         assert!(matches!(err, Error::Validation(msg) if msg.contains("buffers_per_worker")));
     }
 
@@ -318,7 +318,7 @@ normalize = false
 vdb_namespace = ""
 "#
         );
-        let err = load_str(&toml).expect_err("namespace vide");
+        let err = load_str(&toml).expect_err("empty namespace");
         assert!(matches!(err, Error::Validation(msg) if msg.contains("vdb_namespace")));
     }
 
@@ -328,7 +328,7 @@ vdb_namespace = ""
             r#"{VALID_MINIMAL}
 
 [vdb-extra]
-# rien, on surcharge via env-like
+# nothing, we override via env-like
 "#
         );
         // We can't easily override via Toml::string — build a manual map instead.
@@ -341,21 +341,21 @@ vdb_namespace = ""
         match err {
             Error::Validation(msg) => assert!(msg.contains("max_retries")),
             Error::Config(_) => {} // acceptable: parsing failed on the duplicate section
-            other => panic!("erreur inattendue : {other:?}"),
+            other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[test]
     fn empty_registry_is_valid() {
-        let cfg = load_str(VALID_MINIMAL).expect("vide OK");
+        let cfg = load_str(VALID_MINIMAL).expect("empty OK");
         assert!(cfg.models.is_empty());
-        cfg.validate().expect("validation sur registre vide passe");
+        cfg.validate().expect("validation on empty registry passes");
     }
 
     #[test]
     fn invalid_socket_addr_is_config_error() {
         let toml = VALID_MINIMAL.replace("0.0.0.0:50051", "not-a-socket");
-        let err = load_str(&toml).expect_err("socket invalide");
+        let err = load_str(&toml).expect_err("invalid socket");
         assert!(matches!(err, Error::Config(_)));
     }
 }

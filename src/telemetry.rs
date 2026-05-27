@@ -61,7 +61,7 @@ mod tests {
         // recorder (e.g. in http::tests). We tolerate both cases.
         match result {
             Ok(_) | Err(Error::Telemetry(_)) => {}
-            Err(e) => panic!("erreur inattendue : {e:?}"),
+            Err(e) => panic!("unexpected error: {e:?}"),
         }
     }
 }

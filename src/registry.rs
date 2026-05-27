@@ -187,7 +187,7 @@ mod tests {
                     // The "stable" model always exists with dim == 42; the
                     // writer never touches it. Reads must consistently see
                     // this coherent value.
-                    let got = r.get("stable").expect("stable toujours présent");
+                    let got = r.get("stable").expect("stable always present");
                     assert_eq!(got.dim, 42);
                 }
             }));

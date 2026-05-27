@@ -29,11 +29,11 @@ fn bench_l2_norm_squared(c: &mut Criterion) {
     // Global sanity: two different vectors → different squared norms.
     let v1 = gen_vector(1);
     let v2 = gen_vector(2);
-    let n1 = l2_norm_squared(&v1).expect("vecteur valide");
-    let n2 = l2_norm_squared(&v2).expect("vecteur valide");
+    let n1 = l2_norm_squared(&v1).expect("valid vector");
+    let n2 = l2_norm_squared(&v2).expect("valid vector");
     assert!(
         (n1 - n2).abs() > 1.0,
-        "sanité : deux vecteurs distincts doivent donner des normes² distinctes (n1={n1}, n2={n2})"
+        "sanity: two distinct vectors must give distinct squared norms (n1={n1}, n2={n2})"
     );
 
     let mut group = c.benchmark_group("l2_norm_squared");
@@ -43,7 +43,7 @@ fn bench_l2_norm_squared(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(dim), &v, |b, v| {
             b.iter(|| {
                 let input = black_box(v.as_slice());
-                let out = l2_norm_squared(input).expect("vecteur valide");
+                let out = l2_norm_squared(input).expect("valid vector");
                 black_box(out)
             });
         });
@@ -56,19 +56,19 @@ fn bench_normalize_in_place(c: &mut Criterion) {
     // iteration via `iter_batched` to avoid measuring a cumulative drift
     // of the value.
     let template = gen_vector(3);
-    let n2 = l2_norm_squared(&template).expect("valide");
+    let n2 = l2_norm_squared(&template).expect("valid");
 
     // Sanity: the function must actually mutate the vector.
     let mut probe = template.clone();
     let changed = normalize_in_place(&mut probe, n2);
     assert!(
         changed,
-        "sanité : un vecteur non unitaire doit être normalisé"
+        "sanity: a non-unit vector must be normalized"
     );
     let final_n2 = l2_norm_squared(&probe).unwrap();
     assert!(
         (final_n2 - 1.0).abs() < 1e-4,
-        "sanité : post-normalisation la norme² doit être ≈ 1 (eu {final_n2})"
+        "sanity: post-normalization the squared norm must be ~ 1 (got {final_n2})"
     );
 
     c.bench_function("normalize_in_place_1536", |b| {

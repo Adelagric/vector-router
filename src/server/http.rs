@@ -161,7 +161,7 @@ mod tests {
             .unwrap_or("");
         assert!(
             ct.starts_with("text/html"),
-            "content-type HTML attendu, eu {ct}"
+            "expected HTML content-type, got {ct}"
         );
 
         let body_bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
@@ -170,20 +170,20 @@ mod tests {
         let body = std::str::from_utf8(&body_bytes).unwrap();
 
         // Verify the page structure: the three sections are all present.
-        assert!(body.contains("Vector Router"), "titre manquant");
-        assert!(body.contains("État du service"), "section live manquante");
+        assert!(body.contains("Vector Router"), "title missing");
+        assert!(body.contains("Service status"), "live section missing");
         assert!(
-            body.contains("Qualité du code"),
-            "section preuves manquante"
+            body.contains("Code quality"),
+            "evidence section missing"
         );
         assert!(
-            body.contains("Performance mesurée"),
-            "section bench manquante"
+            body.contains("Measured performance"),
+            "bench section missing"
         );
         // The JS must point to /metrics for live refresh.
         assert!(
             body.contains("fetch(\"/metrics\""),
-            "fetch metrics manquant"
+            "fetch metrics missing"
         );
     }
 
@@ -209,7 +209,7 @@ mod tests {
             .unwrap_or("");
         assert!(
             ct.starts_with("text/plain"),
-            "content-type Prometheus attendu, eu {ct}"
+            "expected Prometheus content-type, got {ct}"
         );
     }
 }
