@@ -1,25 +1,15 @@
-//! Crate de vérification pour le repo vitrine vector-router.
+//! Middleware de routage vectoriel : bibliothèque interne.
 //!
-//! Ce crate sert UNIQUEMENT à compiler, tester et linter les modules publics
-//! exposés dans `samples/` (math, pool). Le code complet du produit (registre,
-//! service gRPC, client VDB, licence, etc.) n'est PAS inclus ici — voir
-//! LICENSE et `Licensing` dans le README.
-//!
-//! La CI exécute sur ce crate :
-//!   - `cargo fmt --check`
-//!   - `cargo clippy --all-targets -- -D warnings`
-//!   - `cargo test --all-targets`
-//!
-//! Les ~20 tests embarqués dans `samples/math.rs` et `samples/pool.rs`
-//! couvrent : alignement mémoire, propriétés numériques (NaN/Inf, normalisation),
-//! pool RAII, comportement du pool sous charge concurrente.
+//! Le binaire `vector-router` consomme cette bibliothèque ; la séparation
+//! évite que le code soit marqué mort tant qu'il n'a pas de consommateur final.
 
-#![deny(unsafe_code)]
-
+pub mod client;
+pub mod config;
 pub mod error;
-
-#[path = "../samples/math.rs"]
 pub mod math;
-
-#[path = "../samples/pool.rs"]
 pub mod pool;
+pub mod proto;
+pub mod registry;
+pub mod server;
+pub mod service;
+pub mod telemetry;

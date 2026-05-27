@@ -1,17 +1,23 @@
+/target
+/dist
+/bin
+Cargo.lock.bak
+
+# Editor
 .DS_Store
 ._*
 Thumbs.db
 *.swp
 *.swo
-target/
+.vscode/
+.idea/
 
-# Python
+# Python (sample clients)
 __pycache__/
 *.pyc
 .venv/
 samples/clients/python/_generated/
 
-# Node
+# Node (sample clients)
 node_modules/
 package-lock.json
-

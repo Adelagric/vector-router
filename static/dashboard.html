@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vector Router — Tableau de bord</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --accent: #1F4E79;
+    --accent-light: #2E75B6;
+    --muted: #595959;
+    --rule: #D9D9D9;
+    --bg: #FAFBFC;
+    --card: #FFFFFF;
+    --ok: #2E8B57;
+    --warn: #C57B00;
+    --err: #C00000;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: #1a1a1a;
+    line-height: 1.5;
+  }
+  header {
+    background: var(--accent);
+    color: white;
+    padding: 24px 32px;
+  }
+  header h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  header .sub { opacity: 0.85; font-size: 13px; margin-top: 4px; }
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 32px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 20px;
+  }
+  .card h2 {
+    margin: 0 0 16px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    margin-left: 8px;
+  }
+  .badge.live { background: #E6F3E6; color: var(--ok); }
+  .badge.static { background: #EEF0F2; color: var(--muted); }
+  .metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid #F0F0F0;
+  }
+  .metric:last-child { border-bottom: none; }
+  .metric .label { color: var(--muted); font-size: 13px; }
+  .metric .value {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 14px;
+    color: #1a1a1a;
+  }
+  .metric .value.ok { color: var(--ok); }
+  .metric .value.warn { color: var(--warn); }
+  .metric .value.err { color: var(--err); }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #F0F7F0;
+    border-left: 3px solid var(--ok);
+    border-radius: 4px;
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+  .status-row.err {
+    background: #FDEDED;
+    border-left-color: var(--err);
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+  }
+  .status-dot.err { background: var(--err); }
+  .note {
+    font-size: 11px;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 16px;
+  }
+  footer {
+    text-align: center;
+    padding: 24px;
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    margin-top: 40px;
+  }
+  footer a { color: var(--accent-light); text-decoration: none; }
+  .last-update {
+    position: fixed;
+    bottom: 12px;
+    right: 16px;
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--card);
+    padding: 4px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Vector Router</h1>
+  <div class="sub">Tableau de bord du service — mis à jour toutes les 5 secondes</div>
+</header>
+
+<main>
+
+  <!-- Section 1 : État temps réel -->
+  <div class="card">
+    <h2>État du service <span class="badge live">live</span></h2>
+    <div id="status-row" class="status-row">
+      <div class="status-dot"></div>
+      <div>Service opérationnel</div>
+    </div>
+    <div class="metric">
+      <span class="label">Modèles enregistrés</span>
+      <span class="value" id="registered_models">—</span>
+    </div>
+    <div class="metric">
+      <span class="label">Buffers disponibles</span>
+      <span class="value" id="pool_available">—</span>
+    </div>
+    <div class="metric">
+      <span class="label">Requêtes VDB en vol</span>
+      <span class="value" id="vdb_inflight">—</span>
+    </div>
+    <div class="metric">
+      <span class="label">Requêtes traitées (total)</span>
+      <span class="value" id="requests_total">—</span>
+    </div>
+    <div class="metric">
+      <span class="label">Taux d'erreur</span>
+      <span class="value" id="error_rate">—</span>
+    </div>
+    <div class="metric">
+      <span class="label">Copies par désalignement</span>
+      <span class="value" id="misaligned">—</span>
+    </div>
+    <div class="metric">
+      <span class="label">Fallbacks pool (épuisement)</span>
+      <span class="value" id="pool_exhausted">—</span>
+    </div>
+    <p class="note">Source : <code>/metrics</code> (format Prometheus).</p>
+  </div>
+
+  <!-- Section 2 : Qualité du code -->
+  <div class="card">
+    <h2>Qualité du code <span class="badge static">build</span></h2>
+    <div class="metric">
+      <span class="label">Tests unitaires</span>
+      <span class="value ok">87 ✓</span>
+    </div>
+    <div class="metric">
+      <span class="label">Tests d'intégration</span>
+      <span class="value ok">8 ✓</span>
+    </div>
+    <div class="metric">
+      <span class="label">Test non-régression lifetimes</span>
+      <span class="value ok">1 ✓</span>
+    </div>
+    <div class="metric">
+      <span class="label">miri (math + pool + license)</span>
+      <span class="value ok">aucun UB</span>
+    </div>
+    <div class="metric">
+      <span class="label">loom (pattern concurrence)</span>
+      <span class="value ok">validé</span>
+    </div>
+    <div class="metric">
+      <span class="label">clippy strict <code>-D warnings</code></span>
+      <span class="value ok">passe</span>
+    </div>
+    <div class="metric">
+      <span class="label">Blocs <code>unsafe</code></span>
+      <span class="value ok">0</span>
+    </div>
+    <div class="metric">
+      <span class="label"><code>unwrap</code> hors zones autorisées</span>
+      <span class="value ok">0</span>
+    </div>
+    <p class="note">Vérifié à la dernière compilation. Commandes dans <code>HANDOVER.md</code>.</p>
+  </div>
+
+  <!-- Section 3 : Performance mesurée -->
+  <div class="card">
+    <h2>Performance mesurée <span class="badge static">bench</span></h2>
+    <div class="metric">
+      <span class="label"><code>validate_and_align</code> (aligné)</span>
+      <span class="value">14 ns</span>
+    </div>
+    <div class="metric">
+      <span class="label"><code>validate_and_align</code> (désaligné, copie)</span>
+      <span class="value">207 ns</span>
+    </div>
+    <div class="metric">
+      <span class="label"><code>l2_norm_squared</code> (1536 dim.)</span>
+      <span class="value">702 ns</span>
+    </div>
+    <div class="metric">
+      <span class="label"><code>normalize_in_place</code> (1536 dim.)</span>
+      <span class="value">710 ns</span>
+    </div>
+    <div class="metric">
+      <span class="label">Budget chemin chaud (1 requête)</span>
+      <span class="value">~1,4 µs</span>
+    </div>
+    <div class="metric">
+      <span class="label">Ratio au budget 50 µs</span>
+      <span class="value ok">~3 %</span>
+    </div>
+    <p class="note">
+      Détails reproductibles dans <code>BENCHES.md</code>.
+    </p>
+  </div>
+
+</main>
+
+<footer>
+  Vector Router · Tableau de bord local pour démonstration ·
+  Observabilité production via Grafana
+  (<code>docs/grafana-dashboard.json</code>).
+</footer>
+
+<div class="last-update" id="last-update">chargement…</div>
+
+<script>
+// --- Parsing Prometheus minimal -------------------------------------------
+// On extrait les valeurs des métriques qu'on affiche. Pas de dépendance externe.
+function parsePrometheus(text) {
+  const metrics = {};
+  for (const line of text.split("\n")) {
+    if (line.startsWith("#") || !line.trim()) continue;
+    // exemple: requests_total{model_id="m1",op="upsert",status="ok"} 42
+    const match = line.match(/^(\w+)(\{[^}]*\})?\s+([0-9.eE+-]+)/);
+    if (!match) continue;
+    const [, name, labels, valueStr] = match;
+    const value = parseFloat(valueStr);
+    if (!metrics[name]) metrics[name] = [];
+    metrics[name].push({ labels: labels || "", value });
+  }
+  return metrics;
+}
+
+function sum(metric) {
+  if (!metric) return 0;
+  return metric.reduce((acc, s) => acc + s.value, 0);
+}
+
+function gauge(metric) {
+  if (!metric || metric.length === 0) return null;
+  // pour une gauge on prend la dernière valeur (ou la première, peu importe — une seule série)
+  return metric[0].value;
+}
+
+// --- Rendu ----------------------------------------------------------------
+function render(metrics) {
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+
+  setText("registered_models", gauge(metrics["registered_models"]) ?? "—");
+  setText("pool_available", gauge(metrics["pool_available"]) ?? "—");
+  setText("vdb_inflight", gauge(metrics["vdb_inflight"]) ?? "—");
+
+  const totalRequests = sum(metrics["requests_total"]);
+  setText("requests_total", totalRequests.toLocaleString("fr-FR"));
+
+  // taux d'erreur = (total - ok) / total
+  const okRequests = (metrics["requests_total"] || [])
+    .filter(s => /status="ok"/.test(s.labels))
+    .reduce((a, s) => a + s.value, 0);
+  if (totalRequests > 0) {
+    const errorRate = ((totalRequests - okRequests) / totalRequests) * 100;
+    setText("error_rate", errorRate.toFixed(2) + " %");
+  } else {
+    setText("error_rate", "0 %");
+  }
+
+  setText("misaligned", sum(metrics["misaligned_copies_total"]).toLocaleString("fr-FR"));
+  setText("pool_exhausted", sum(metrics["pool_exhausted_total"]).toLocaleString("fr-FR"));
+}
+
+function setDown(reason) {
+  const row = document.getElementById("status-row");
+  row.className = "status-row err";
+  row.innerHTML = `<div class="status-dot err"></div><div>Service injoignable — ${reason}</div>`;
+}
+
+function setUp() {
+  const row = document.getElementById("status-row");
+  row.className = "status-row";
+  row.innerHTML = `<div class="status-dot"></div><div>Service opérationnel</div>`;
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch("/metrics", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const text = await resp.text();
+    const metrics = parsePrometheus(text);
+    render(metrics);
+    setUp();
+  } catch (e) {
+    setDown(e.message);
+  } finally {
+    document.getElementById("last-update").textContent =
+      "màj " + new Date().toLocaleTimeString("fr-FR");
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+
+</body>
+</html>

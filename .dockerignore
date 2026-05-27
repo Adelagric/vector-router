@@ -1,0 +1,7 @@
+target/
+dist/
+bin/
+.git/
+.DS_Store
+*.swp
+*.swo
