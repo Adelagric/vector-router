@@ -1,9 +1,21 @@
 name: Extended
 
-# Slow verifications (miri + loom). Kept separate from the CI workflow so
-# pushes and PRs are not blocked while these run. Triggered on:
+# Slow verifications (miri). Kept separate from the CI workflow so pushes
+# and PRs are not blocked while these run. Triggered on:
 #   - every push to main
 #   - nightly cron at 03:17 UTC
+#   - manual workflow_dispatch
+#
+# Note on loom: `make loom` runs the concurrency model check on
+# `registry::registry_loom` locally. It is NOT wired into CI because
+# `RUSTFLAGS=--cfg loom` propagates to every dependency in the build graph,
+# and `hyper-util` cannot compile when `tokio` is built with `cfg(loom)`
+# (no `tokio::net` under loom). Making this work in CI would require
+# either splitting `registry` into a separate workspace crate that does
+# not depend on tokio, or feature-gating `qdrant-client` as optional and
+# rebuilding without it under loom. Both are invasive; the manual
+# `make loom` target stays available for contributors who want to verify
+# the concurrency model locally.
 
 on:
   push:
@@ -16,6 +28,10 @@ jobs:
   miri:
     name: miri (math + pool)
     runs-on: ubuntu-latest
+    env:
+      # Override rust-toolchain.toml which pins stable 1.95.0; miri only
+      # ships on nightly.
+      RUSTUP_TOOLCHAIN: nightly
     steps:
       - uses: actions/checkout@v4
 
@@ -40,25 +56,3 @@ jobs:
 
       - name: cargo miri test --lib pool
         run: cargo miri test --lib pool
-
-  loom:
-    name: loom (registry concurrency model)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install protobuf compiler
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
-
-      - name: Toolchain stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: loom
-
-      - name: RUSTFLAGS=--cfg loom cargo test --release --lib registry_loom
-        env:
-          RUSTFLAGS: "--cfg loom"
-        run: cargo test --release --lib registry_loom
