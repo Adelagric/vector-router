@@ -1,6 +1,7 @@
 # vector-router
 
 [![CI](https://github.com/Adelagric/vector-router/actions/workflows/ci.yml/badge.svg)](https://github.com/Adelagric/vector-router/actions/workflows/ci.yml)
+[![Extended (miri + loom)](https://github.com/Adelagric/vector-router/actions/workflows/extended.yml/badge.svg)](https://github.com/Adelagric/vector-router/actions/workflows/extended.yml)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
