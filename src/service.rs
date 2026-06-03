@@ -166,7 +166,7 @@ mod tests {
 
     use crate::client::mock::MockVdbClient;
     use crate::config::{
-        AdminConfig, ModelSpec, PoolConfig, ServerConfig, TelemetryConfig, VdbConfig,
+        AdminConfig, ModelSpec, PoolConfig, ServerConfig, TelemetryConfig, VdbBackend, VdbConfig,
     };
 
     fn test_config() -> Config {
@@ -192,11 +192,14 @@ mod tests {
                 bearer_token: "secret-test".to_string(),
             },
             vdb: VdbConfig {
+                backend: VdbBackend::Qdrant,
                 url: "http://localhost:6334".to_string(),
                 api_key: None,
                 timeout_ms: 100,
                 max_retries: 3,
                 retry_base_delay_ms: 10,
+                ef_search: None,
+                max_connections: None,
             },
             pool: PoolConfig {
                 buffers_per_worker: 2,

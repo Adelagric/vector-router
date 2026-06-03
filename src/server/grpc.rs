@@ -458,6 +458,7 @@ mod tests {
 
     use crate::client::SearchHit;
     use crate::client::mock::MockVdbClient;
+    use crate::config::VdbBackend;
 
     fn make_service(vdb: Arc<dyn VectorDbClient>) -> VectorRouterService {
         let mut models = HashMap::new();
@@ -480,11 +481,14 @@ mod tests {
         let registry = Arc::new(Registry::new(models));
         let pool = Arc::new(BufferPool::new(2, 1024));
         let vdb_cfg = VdbConfig {
+            backend: VdbBackend::Qdrant,
             url: "http://test".to_string(),
             api_key: None,
             timeout_ms: 5000,
             max_retries: 3,
             retry_base_delay_ms: 1, // fast for tests
+            ef_search: None,
+            max_connections: None,
         };
         VectorRouterService::new(registry, pool, vdb, &vdb_cfg)
     }
@@ -702,11 +706,14 @@ mod tests {
         let registry = Arc::new(Registry::new(models));
         let pool = Arc::new(BufferPool::new(1, 1024));
         let vdb_cfg = VdbConfig {
+            backend: VdbBackend::Qdrant,
             url: "http://test".to_string(),
             api_key: None,
             timeout_ms: 5000,
             max_retries: 3,
             retry_base_delay_ms: 1,
+            ef_search: None,
+            max_connections: None,
         };
         let svc = VectorRouterService::new(registry, pool.clone(), mock, &vdb_cfg);
 
