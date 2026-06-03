@@ -69,7 +69,12 @@ fn meta(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         .collect()
 }
 
-fn upsert(namespace: &str, point_id: &str, vector: Vec<f32>, metadata: &[(&str, &str)]) -> UpsertParams {
+fn upsert(
+    namespace: &str,
+    point_id: &str,
+    vector: Vec<f32>,
+    metadata: &[(&str, &str)],
+) -> UpsertParams {
     UpsertParams {
         namespace: namespace.to_string(),
         point_id: point_id.to_string(),
@@ -139,7 +144,12 @@ async fn upsert_then_search_round_trip() {
         .await
         .expect("upsert a");
     client
-        .upsert(upsert(ns, "b", vec![0.0, 1.0, 0.0], &[("tenant", "globex")]))
+        .upsert(upsert(
+            ns,
+            "b",
+            vec![0.0, 1.0, 0.0],
+            &[("tenant", "globex")],
+        ))
         .await
         .expect("upsert b");
 
@@ -182,7 +192,10 @@ async fn upsert_is_idempotent_on_point_id() {
         .search(search(ns, vec![0.0, 1.0, 0.0], 10))
         .await
         .expect("search");
-    let dup = hits.iter().find(|h| h.point_id == "dup").expect("dup found");
+    let dup = hits
+        .iter()
+        .find(|h| h.point_id == "dup")
+        .expect("dup found");
     assert_eq!(
         dup.metadata.get("v"),
         Some(&"2".to_string()),
@@ -199,11 +212,21 @@ async fn search_applies_metadata_filter() {
         .expect("connect");
 
     client
-        .upsert(upsert(ns, "acme-1", vec![1.0, 0.0, 0.0], &[("tenant", "acme")]))
+        .upsert(upsert(
+            ns,
+            "acme-1",
+            vec![1.0, 0.0, 0.0],
+            &[("tenant", "acme")],
+        ))
         .await
         .expect("upsert acme");
     client
-        .upsert(upsert(ns, "globex-1", vec![1.0, 0.0, 0.0], &[("tenant", "globex")]))
+        .upsert(upsert(
+            ns,
+            "globex-1",
+            vec![1.0, 0.0, 0.0],
+            &[("tenant", "globex")],
+        ))
         .await
         .expect("upsert globex");
 
@@ -212,7 +235,8 @@ async fn search_applies_metadata_filter() {
     let hits = client.search(params).await.expect("filtered search");
 
     assert!(
-        hits.iter().all(|h| h.metadata.get("tenant") == Some(&"acme".to_string())),
+        hits.iter()
+            .all(|h| h.metadata.get("tenant") == Some(&"acme".to_string())),
         "filter must exclude other tenants"
     );
     assert!(hits.iter().any(|h| h.point_id == "acme-1"));
@@ -240,7 +264,10 @@ async fn search_applies_score_threshold() {
     params.score_threshold = Some(0.5);
     let hits = client.search(params).await.expect("threshold search");
 
-    assert!(hits.iter().any(|h| h.point_id == "near"), "near passes threshold");
+    assert!(
+        hits.iter().any(|h| h.point_id == "near"),
+        "near passes threshold"
+    );
     assert!(
         !hits.iter().any(|h| h.point_id == "far"),
         "orthogonal point (score ~0) must be filtered out by threshold 0.5"
