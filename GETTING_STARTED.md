@@ -21,9 +21,10 @@ This document assumes you have access to the repo (`git clone` + `make build`
 The binary is compiled for `x86-64-v3` (Haswell 2013 and newer). Any server
 CPU bought after 2014 will work.
 
-**Vector backend.** A reachable Qdrant instance. Tested against Qdrant 1.12+.
-The URL goes into `config.toml` — no other backend is supported in this
-version.
+**Vector backend.** One of:
+
+- **Qdrant** (default) — a reachable Qdrant 1.12+ instance; its URL goes into `config.toml`.
+- **PostgreSQL + pgvector** — Postgres with the `pgvector` extension, with the router built `--features pgvector`. The router auto-creates one table and HNSW index per model namespace on startup, so the connecting role needs `CREATE` on the target database (and the privilege to `CREATE EXTENSION vector` the first time, unless `vector` is already installed). For a least-privilege setup, pre-provision once with [`sql/pgvector_schema.sql`](sql/pgvector_schema.sql) using an admin role, then run the router with a restricted one.
 
 **Ports.**
 
@@ -46,7 +47,9 @@ runs stateless as long as the vector backend is reachable.
 # 1. Build (from source)
 git clone https://github.com/Adelagric/vector-router.git
 cd vector-router
-make build               # produces target/release/vector-router
+make build               # produces target/release/vector-router (Qdrant backend)
+# For the pgvector backend instead:
+#   cargo build --release --no-default-features --features pgvector
 
 # 2. Install the binary
 sudo install -m 755 target/release/vector-router /usr/local/bin/
@@ -101,6 +104,19 @@ VR_VDB__URL="http://qdrant.prod:6334" \
 ```
 
 Useful for keeping secrets out of the committed TOML.
+
+**Using pgvector.** Set `backend = "pgvector"` and put a Postgres connection
+string in `url`; each model's `vdb_namespace` then names a table (one table per
+model dimension, auto-created on boot). Optional knobs: `ef_search` (HNSW
+recall/latency, applied per query via `SET LOCAL`) and `max_connections` (sqlx
+pool size). Full reference in `config.example.toml`.
+
+```toml
+[vdb]
+backend = "pgvector"
+url = "postgres://vr:secret@postgres.internal:5432/vectors"
+ef_search = 80
+```
 
 ---
 

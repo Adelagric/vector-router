@@ -21,12 +21,27 @@ max_decoding_message_size_bytes = 16_777_216
 bearer_token = "change-me-in-production"
 
 [vdb]
+# Backend: "qdrant" (default) or "pgvector". Omit for Qdrant.
+backend = "qdrant"
+# Qdrant: cluster URL. pgvector: a Postgres connection string, e.g.
+#   url = "postgres://user:pass@postgres:5432/vectors"
 url = "http://qdrant:6334"
-# Optional: Qdrant API key. Leave empty to disable auth.
+# Optional: Qdrant API key. Leave empty to disable auth. (pgvector carries
+# its auth in `url`.)
 # api_key = "your-key"
 timeout_ms = 500
 max_retries = 3
 retry_base_delay_ms = 50
+
+# --- pgvector backend (build with `--features pgvector`) --------------------
+# To target PostgreSQL + pgvector instead of Qdrant, set:
+#   backend = "pgvector"
+#   url     = "postgres://user:pass@postgres:5432/vectors"
+# Each model's `vdb_namespace` becomes a table (one per model dimension);
+# the table and its HNSW index are auto-created on startup. pgvector-only
+# knobs, both optional:
+#   ef_search       = 80   # HNSW recall/latency per query (SET LOCAL); higher = better recall
+#   max_connections = 16   # sqlx connection-pool size
 
 [pool]
 # Number of buffers per tokio worker (N = buffers_per_worker × n_workers).
@@ -41,7 +56,8 @@ log_level = "info"
 
 # --- Declared models --------------------------------------------------------
 # Each model produces vectors of a fixed dimension, with or without
-# normalization, and targets a dedicated Qdrant namespace (collection).
+# normalization, and targets a dedicated namespace (a Qdrant collection, or
+# a pgvector table).
 #
 # An undeclared model = request rejected with UnknownModel. No automatic
 # discovery.
