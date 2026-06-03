@@ -26,8 +26,8 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::client::{QdrantVdbClient, VectorDbClient};
-use crate::config::Config;
+use crate::client::VectorDbClient;
+use crate::config::{Config, VdbBackend};
 use crate::error::Error;
 use crate::pool::BufferPool;
 use crate::registry::Registry;
@@ -60,14 +60,33 @@ impl ServiceHandles {
     }
 }
 
-/// Starts the full service with a `QdrantVdbClient` built from config.
-/// Variant used by `main.rs`.
+/// Starts the full service, building the VDB client selected by
+/// `config.vdb.backend`. Variant used by `main.rs`.
+///
+/// Each backend arm is gated by its Cargo feature; selecting a backend whose
+/// feature was not compiled in fails fast with a clear error rather than
+/// silently falling back to another store.
 pub async fn start_service(
     config: &Config,
     metrics_handle: PrometheusHandle,
     shutdown_tx: broadcast::Sender<()>,
 ) -> Result<ServiceHandles, Error> {
-    let vdb: Arc<dyn VectorDbClient> = Arc::new(QdrantVdbClient::new(&config.vdb)?);
+    let vdb: Arc<dyn VectorDbClient> = match config.vdb.backend {
+        #[cfg(feature = "qdrant")]
+        VdbBackend::Qdrant => Arc::new(crate::client::QdrantVdbClient::new(&config.vdb)?),
+        #[cfg(feature = "pgvector")]
+        VdbBackend::Pgvector => {
+            Arc::new(crate::client::PgVectorClient::connect(&config.vdb, &config.models).await?)
+        }
+        // Present only when a single backend is compiled in: rejects a config
+        // that names the other, absent backend.
+        #[cfg(not(all(feature = "qdrant", feature = "pgvector")))]
+        backend => {
+            return Err(Error::Validation(format!(
+                "vdb.backend = {backend:?} is selected, but this binary was built without that backend; recompile with the matching Cargo feature"
+            )));
+        }
+    };
     start_service_with_vdb(config, metrics_handle, vdb, shutdown_tx).await
 }
 
