@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # `.cargo/config.toml` uses target-cpu=native for local dev. On CI runner
+  # VMs that can emit instructions the CPU/hypervisor does not support (SIGILL)
+  # and poisons the build cache shared across heterogeneous runners. Pin a
+  # portable baseline (x86-64-v2 is supported by every GitHub-hosted runner).
+  RUSTFLAGS: "-C target-cpu=x86-64-v2"
+
 jobs:
   fmt:
     name: rustfmt

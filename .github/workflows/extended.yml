@@ -24,6 +24,11 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
+env:
+  # See ci.yml: pin a portable target-cpu so the build script never SIGILLs on
+  # a CI runner whose CPU lacks an instruction selected by target-cpu=native.
+  RUSTFLAGS: "-C target-cpu=x86-64-v2"
+
 jobs:
   miri:
     name: miri (math + pool)
