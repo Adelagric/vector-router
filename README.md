@@ -69,7 +69,7 @@ services:
     ports: ["6333:6333", "6334:6334"]
 
   vector-router:
-    image: vector-router:0.1.0          # build via: make docker
+    image: vector-router:0.2.0          # build via: make docker
     ports: ["50051:50051", "9090:9090"]
     volumes:
       - ./config.toml:/etc/vector-router/config.toml:ro
