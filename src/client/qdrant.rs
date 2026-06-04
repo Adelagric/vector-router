@@ -232,14 +232,18 @@ impl VectorDbClient for QdrantVdbClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::VdbBackend;
 
     fn cfg(url: &str, timeout_ms: u64) -> VdbConfig {
         VdbConfig {
+            backend: VdbBackend::Qdrant,
             url: url.to_string(),
             api_key: None,
             timeout_ms,
             max_retries: 3,
             retry_base_delay_ms: 50,
+            ef_search: None,
+            max_connections: None,
         }
     }
 

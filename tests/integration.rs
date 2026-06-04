@@ -29,7 +29,7 @@ use tower::layer::util::Identity;
 use tower::limit::ConcurrencyLimitLayer;
 
 use vector_router::client::{SearchHit, SearchParams, UpsertParams, VectorDbClient};
-use vector_router::config::{ModelSpec, VdbConfig};
+use vector_router::config::{ModelSpec, VdbBackend, VdbConfig};
 use vector_router::error::Error as VrError;
 use vector_router::pool::BufferPool;
 use vector_router::proto::vector_router::v1::{
@@ -132,11 +132,14 @@ fn make_registry() -> Arc<Registry> {
 
 fn vdb_cfg() -> VdbConfig {
     VdbConfig {
+        backend: VdbBackend::Qdrant,
         url: "http://test".to_string(),
         api_key: None,
         timeout_ms: 5000,
         max_retries: 1,
         retry_base_delay_ms: 1,
+        ef_search: None,
+        max_connections: None,
     }
 }
 

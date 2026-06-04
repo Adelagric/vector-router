@@ -116,3 +116,40 @@ Rationale: three pieces in one sprint to make the middleware commercially distri
 **Tests**: unit additions (`normalize_producer` on the gRPC side) + integration. Clippy `-D warnings` green.
 
 > **Historical note**: a runtime license layer signed with Ed25519 (signed claims, public key embedded via `include_bytes!`, 45-day evaluation mode) was developed then removed when moving to Apache 2.0. The code remains accessible in the git history for anyone who wants to rebuild gating for their enterprise fork.
+
+## 2026-06-03 — pgvector backend (v0.2.0)
+
+The v0.2 goal is adoption: strict validation plus the most widely deployed vector store, pgvector, at zero install friction. Everything below is, and stays, Apache 2.0.
+
+### sqlx rather than Diesel or SeaORM
+Rationale: the data layer is async-native and tokio-first (matching tonic 0.14), with a thin abstraction that leaves the pgvector operators and index tuning in plain sight — exactly what an ORM hides. The choice is **not** about query-construction speed (the bottleneck is the Postgres round trip, not building the SQL string) but about control, dependency discipline, and fit with the project's ethos. sqlx is pinned with `default-features = false` and only `postgres` + `runtime-tokio-rustls`; the `pgvector` crate's `sqlx` feature provides `pgvector::Vector: Encode/Decode`, so a `Vec<f32>` binds straight onto a `vector` column.
+
+### sqlx 0.8, not the freshly released 0.9
+Rationale: 0.9 shipped days before this work and reorganized its runtime/TLS features (the `runtime-tokio-rustls` alias the ecosystem documents is 0.8-shaped). For an adoption-focused release the mature 0.8.6 is the lower-risk pin; `pgvector` 0.4.2 allows `>=0.8, <0.10`, so the upgrade path stays open. On 0.8.6 `runtime-tokio-rustls` resolves to rustls + ring (not aws-lc-rs), so no cmake / C toolchain enters the build — which matters for the distroless image.
+
+### Backends are Cargo features; pgvector is opt-in, Qdrant stays the default
+Rationale: `default = ["qdrant"]` keeps existing builds bit-for-bit identical and sqlx out of their dependency tree. pgvector lives behind `--features pgvector`; a `--no-default-features --features pgvector` build drops qdrant-client and its transitive tonic 0.12 tree entirely. A `compile_error!` guards the no-backend build, and `start_service` rejects a config that names a backend whose feature was not compiled in (clear error, no silent fallback).
+
+### Namespace = table (imposed by pgvector, not a preference)
+Rationale: a `vector(N)` column is fixed-dimension. Since each model has its own dimension, each needs its own table. The existing `model_id -> vdb_namespace` mapping becomes `namespace -> table`. Config validation enforces that all models sharing a namespace agree on dimension, and that the namespace is a safe identifier: it is interpolated into SQL (a table name cannot be a bind parameter), so it is validated against `[A-Za-z0-9_-]`, capped at 63 bytes, and double-quoted. Bonus: per-model index isolation, and a natural seam for the v0.3 multi-tenant layer.
+
+### HNSW + inner product, leaning on guaranteed normalization
+Rationale: indexes use HNSW (pgvector 0.5+) rather than IVFFlat — better recall/latency, no training step. The opclass is `vector_ip_ops` (inner product, `<#>`), not `vector_cosine_ops`: Vector Router L2-normalizes in its hot path, so on unit vectors inner product **is** cosine, and `<#>` is marginally cheaper. pgvector returns `<#>` as the negative inner product, so the score handed back is `(embedding <#> $query) * -1`, in the same `[-1, 1]` range as the Qdrant cosine score — `score_threshold` semantics carry over unchanged.
+
+### `ef_search` per query via `SET LOCAL`
+Rationale: `vdb.ef_search` trades recall for latency. It is applied with `SET LOCAL hnsw.ef_search = N`, which is transaction-scoped, so a configured search runs inside a transaction. Left unset, the server default applies.
+
+### Client contract identical to Qdrant: one-shot + strict timeout, retry in the handler
+Rationale: matching the existing decision ("No exponential retry in the VDB client"), `PgVectorClient` makes one call per operation wrapped in `tokio::time::timeout`. A timeout becomes `Error::Vdb("timeout ...")`, the only class `is_transient()` retries — so the gRPC handler's existing backoff drives retries for both backends with no handler change. `inflight()` reuses the `AtomicU64` + RAII-guard pattern.
+
+### Metadata as JSON text cast to `jsonb` (no sqlx `json` feature)
+Rationale: enabling the sqlx facade's `json` feature drags in the MySQL and SQLite drivers (and an RSA/crypto subtree), because that feature activates json across **all** drivers. Instead metadata is serialized with serde_json (already a dependency) to a text literal and cast `$n::jsonb` in SQL; reads select `metadata::text` and parse in Rust. The equality filter uses jsonb containment (`metadata @> $n::jsonb`), mirroring Qdrant's match-all semantics. Net: the sqlx feature set stays minimal.
+
+### Schema auto-provisioned at startup (idempotent); SQL also shipped
+Rationale: zero install friction is the v0.2 headline. The router knows each namespace and dimension from config, so on boot it runs `CREATE EXTENSION / TABLE / INDEX IF NOT EXISTS`. `sql/pgvector_schema.sql` ships the same DDL for operators who run under a least-privilege role and prefer to pre-provision with a privileged role, then point the router at a restricted one. Unlike Qdrant (where a point id must be `u64` or UUID), the pgvector table uses a `TEXT` primary key, so arbitrary `point_id`s just work — the Qdrant `point_id` quirk has no analogue here.
+
+### CI without a live database at build time
+Rationale: queries use the runtime-checked sqlx API (`query` / `fetch_all`), not the compile-time macros, so no `.sqlx` cache is committed and the build never needs a database. The live tests (`tests/pgvector_integration.rs`) run in a dedicated CI job against a `pgvector/pgvector:pg16` service container via `VR_TEST_PG_URL`, and skip when it is unset so default and local runs stay green.
+
+### Where an additive Enterprise layer would graft (NOT built here)
+Note for v0.3+: the Enterprise tier must remain **purely additive** — no free-core feature ever moves behind a paywall. The natural seams, none of which exist in v0.2: a per-tenant predicate injected into the search `WHERE` clause (or a tenant column / table-per-tenant, which namespace=table already foreshadows); a quota check around `UpsertParams` keyed by `producer_id`; RBAC enforced before `validate_and_prepare` in the gRPC handler. Each would wrap, not modify, the Apache-2.0 core.

@@ -22,11 +22,12 @@ VERSION        := $(shell grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 help:
 	@echo "vector-router $(VERSION) — targets:"
 	@echo "  build       Compile release binary"
-	@echo "  test        Unit + integration tests"
+	@echo "  test        Unit + integration tests (default + pgvector)"
+	@echo "  test-pgvector  pgvector tests (set VR_TEST_PG_URL for the live suite)"
 	@echo "  bench       Criterion benchmarks"
 	@echo "  miri        Memory safety check on sensitive modules"
 	@echo "  loom        Concurrency model check"
-	@echo "  check       clippy + fmt"
+	@echo "  check       clippy (default + pgvector) + fmt"
 	@echo "  docker      Build distroless image $(BINARY_NAME):$(VERSION)"
 	@echo "  clean       Remove target/"
 
@@ -37,6 +38,11 @@ build:
 .PHONY: test
 test:
 	cargo test --all-targets --locked
+	cargo test --all-targets --locked --features pgvector
+
+.PHONY: test-pgvector
+test-pgvector:
+	cargo test --all-targets --locked --features pgvector
 
 .PHONY: bench
 bench:
@@ -56,6 +62,7 @@ loom:
 check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets --locked -- -D warnings
+	cargo clippy --all-targets --locked --features pgvector -- -D warnings
 
 .PHONY: docker
 docker:

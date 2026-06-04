@@ -11,6 +11,8 @@
 
 Open-source Rust middleware (Apache 2.0). No inference, no models. Bounded scope, by design.
 
+**Backends:** Qdrant (default) and PostgreSQL + **pgvector** — selected per deployment behind a Cargo feature, so you compile only the one you run.
+
 ---
 
 ## Before / after
@@ -101,6 +103,41 @@ curl -s http://localhost:9090/metrics | head  # live Prometheus metrics
 
 From this point on, any `Upsert` / `Search` request to `localhost:50051` goes through validation + normalization + routing. Rejections show up in `/metrics` and on stderr as structured JSON.
 
+### …or with PostgreSQL + pgvector
+
+Build with the `pgvector` feature and point the router at Postgres. Tables and HNSW indexes are created automatically on first boot — no migration step.
+
+```bash
+# 1. Any Postgres with the pgvector extension (managed RDS / Neon / Supabase work too)
+docker run -d --name pg -p 5432:5432 \
+  -e POSTGRES_USER=vr -e POSTGRES_PASSWORD=vr -e POSTGRES_DB=vectors \
+  pgvector/pgvector:pg16
+
+# 2. Build and run the router with the pgvector backend
+cargo build --release --features pgvector
+VR_CONFIG_PATH=config.toml ./target/release/vector-router
+```
+
+```toml
+# config.toml — pgvector variant (full options in config.example.toml)
+[server]
+grpc_bind = "0.0.0.0:50051"
+http_bind = "0.0.0.0:9090"
+
+[admin]
+bearer_token = "change-me-in-production"
+
+[vdb]
+backend = "pgvector"
+url = "postgres://vr:vr@localhost:5432/vectors"
+ef_search = 80                 # optional: HNSW recall/latency knob
+
+[models."openai-text-embedding-3-small"]
+dim = 1536
+normalize = true
+vdb_namespace = "openai_small" # becomes a table; one table per model dimension
+```
+
 Full operator walkthrough in [`GETTING_STARTED.md`](GETTING_STARTED.md).
 
 ---
@@ -108,7 +145,7 @@ Full operator walkthrough in [`GETTING_STARTED.md`](GETTING_STARTED.md).
 ## Architecture
 
 ```
-[Embedding producers] ── gRPC ─▶ [vector-router] ── gRPC ─▶ [Qdrant]
+[Embedding producers] ── gRPC ─▶ [vector-router] ── gRPC ─▶ [Qdrant | pgvector]
                                        │
                                        ▼
                               Prometheus /metrics
@@ -128,7 +165,7 @@ Module-by-module code tour: [`CODE_WALKTHROUGH.md`](CODE_WALKTHROUGH.md). Design
 
 - **Hot path**: ~330 ns for 1536 dims (validation + L2 norm² + normalization) on Mac Studio M4 Max; ~1.4 µs on a 2017 Intel Kaby Lake laptop. Methodology and reproducibility in [`BENCHES.md`](BENCHES.md).
 - **`l2_norm_squared` throughput**: ~11 Gelem/s on M4 Max, ~2.2 Gelem/s on Kaby Lake. Branchless + 8 parallel accumulators, no `unsafe`, no `-C fast-math`.
-- **Tests**: 71 unit + integration + loom concurrency, all green. Zero `unsafe`, zero `unwrap`/`expect` outside `main.rs`, clippy `-D warnings` green, miri green on `math` and `pool`.
+- **Tests**: 90+ unit (across both backends) + integration + loom concurrency, all green. Zero `unsafe`, zero `unwrap`/`expect` outside `main.rs`, clippy `-D warnings` green, miri green on `math` and `pool`.
 - **Docker image**: ~46 MB (distroless/cc `nonroot`, CPU target `x86-64-v3`).
 
 ---
@@ -177,9 +214,12 @@ cd vector-router
 
 # Native (uses .cargo/config.toml → target-cpu=native)
 make build               # release binary in target/release/vector-router
-make test                # 71+ tests
-make check               # clippy -D warnings + fmt --check
+make test                # 90+ tests (default + pgvector)
+make check               # clippy -D warnings (default + pgvector) + fmt --check
 make bench               # reproducible Criterion benchmarks
+
+# Build with the pgvector backend instead of Qdrant (drops qdrant-client):
+cargo build --release --no-default-features --features pgvector
 
 # Portable Docker image (target-cpu=x86-64-v3)
 make docker              # vector-router:<version>
@@ -210,7 +250,7 @@ Vector Router is distributed under the **[Apache License 2.0](LICENSE)**. You ca
 
 ## Commercial support
 
-If you want production support with an SLA, custom integrations (pgvector, Pinecone, Weaviate, OTLP, dynamic admin endpoints), deployment consulting or configurations specific to your stack, that's the separate paid offering:
+If you want production support with an SLA, custom integrations (Pinecone, Weaviate, OTLP, dynamic admin endpoints), deployment consulting or configurations specific to your stack, that's the separate paid offering:
 
 **Contact**: [kaleche@gmail.com](mailto:kaleche@gmail.com)
 

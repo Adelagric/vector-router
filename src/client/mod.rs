@@ -12,9 +12,15 @@ use async_trait::async_trait;
 use crate::error::Error;
 
 pub mod noop;
+#[cfg(feature = "pgvector")]
+pub mod pgvector;
+#[cfg(feature = "qdrant")]
 pub mod qdrant;
 
 pub use noop::NoopVdbClient;
+#[cfg(feature = "pgvector")]
+pub use pgvector::PgVectorClient;
+#[cfg(feature = "qdrant")]
 pub use qdrant::QdrantVdbClient;
 
 /// Parameters for ingesting a single point.

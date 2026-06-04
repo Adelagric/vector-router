@@ -7,28 +7,89 @@ on:
     branches: [main]
 
 jobs:
-  verify:
-    name: fmt + clippy + tests
+  fmt:
+    name: rustfmt
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain + rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+  verify:
+    name: clippy + tests (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Default build (qdrant is the default feature).
+          - label: qdrant
+            flags: "--no-default-features --features qdrant"
+          # Lean pgvector-only build: no qdrant-client in the tree.
+          - label: pgvector
+            flags: "--no-default-features --features pgvector"
+          # Both backends compiled in (exhaustive backend match).
+          - label: both
+            flags: "--features pgvector"
     steps:
       - uses: actions/checkout@v4
 
       - name: Install protobuf compiler
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
 
-      - name: Toolchain stable + clippy + rustfmt
+      - name: Toolchain + clippy
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
-
-      - name: cargo fmt --check
-        run: cargo fmt --all -- --check
+        with:
+          key: ${{ matrix.label }}
 
       - name: cargo clippy -D warnings
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --all-targets --locked ${{ matrix.flags }} -- -D warnings
 
       - name: cargo test
-        run: cargo test --all-targets --locked
+        run: cargo test --all-targets --locked ${{ matrix.flags }}
+
+  pgvector-integration:
+    name: pgvector integration (live Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: vr
+          POSTGRES_PASSWORD: vr
+          POSTGRES_DB: vr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vr -d vr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Picked up by tests/pgvector_integration.rs; absent => those tests skip.
+      VR_TEST_PG_URL: "postgres://vr:vr@localhost:5432/vr"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
+
+      - name: Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: pgvector-it
+
+      - name: cargo test --features pgvector (live)
+        run: cargo test --features pgvector --locked

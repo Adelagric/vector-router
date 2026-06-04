@@ -13,3 +13,8 @@ pub mod registry;
 pub mod server;
 pub mod service;
 pub mod telemetry;
+
+#[cfg(not(any(feature = "qdrant", feature = "pgvector")))]
+compile_error!(
+    "enable at least one vector-database backend feature: `qdrant` (default) and/or `pgvector`"
+);

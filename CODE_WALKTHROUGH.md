@@ -161,9 +161,26 @@ The boolean return indicates whether a division actually happened (useful for th
 
 ---
 
+### `client/` — the VDB backends
+
+`client/mod.rs` defines `VectorDbClient`, the async trait that is the only seam between the gRPC pipeline and a concrete store: `upsert`, `search`, `health`, and an `inflight()` saturation gauge. Parameter types (`UpsertParams`, `SearchParams`, `SearchHit`) are owned, so they cross `.await` without lifetime friction. Each backend is an implementation behind a Cargo feature; the default is `qdrant`.
+
+**`client/qdrant.rs`** (feature `qdrant`) — the original backend. Maps `point_id` onto Qdrant's `u64`-or-UUID id space, wraps every call in `tokio::time::timeout`, and tracks `inflight` with an `AtomicU64` + RAII guard.
+
+**`client/pgvector.rs`** (feature `pgvector`) — PostgreSQL + pgvector on sqlx:
+
+- **Namespace = table.** A `vector(N)` column is fixed-dimension, so each model dimension needs its own table; `vdb_namespace` is the table name. The namespace is validated (safe identifier) at config load and double-quoted when interpolated into SQL.
+- **Auto-provisioning.** On `connect`, `ensure_schema` runs `CREATE EXTENSION / TABLE / INDEX IF NOT EXISTS` for each namespace in the registry. `sql/pgvector_schema.sql` ships the same DDL for least-privilege deployments.
+- **HNSW + inner product.** The index uses `vector_ip_ops` (`<#>`). Because the router emits unit vectors, inner product equals cosine; the returned score is `(embedding <#> $q) * -1`, matching Qdrant's `[-1, 1]` range. `ef_search` is applied per query with `SET LOCAL` inside a transaction.
+- **Same contract as Qdrant.** One-shot calls under `tokio::time::timeout`; a timeout surfaces as `Error::Vdb("timeout ...")` so the handler's retry policy applies unchanged. Metadata round-trips as JSON text cast to `jsonb`, keeping the sqlx feature set minimal.
+
+The pure SQL builders and JSON conversions are unit-tested without a database; end-to-end behavior is covered by `tests/pgvector_integration.rs` against a live Postgres + pgvector in CI.
+
+---
+
 ## How the modules fit together
 
-The service exposes two gRPC RPCs: `Upsert` (write) and `Search` (read). The two share **exactly the same validation and normalization pipeline**; only the final Qdrant operation and the response shape differ.
+The service exposes two gRPC RPCs: `Upsert` (write) and `Search` (read). The two share **exactly the same validation and normalization pipeline**; only the final vector-database operation and the response shape differ.
 
 ### Shared Upsert/Search pipeline
 
