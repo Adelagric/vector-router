@@ -18,7 +18,7 @@ jobs:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Toolchain + rustfmt
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -43,7 +43,7 @@ jobs:
           - label: both
             flags: "--features pgvector"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install protobuf compiler
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
@@ -85,7 +85,7 @@ jobs:
       # Picked up by tests/pgvector_integration.rs; absent => those tests skip.
       VR_TEST_PG_URL: "postgres://vr:vr@localhost:5432/vr"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install protobuf compiler
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
